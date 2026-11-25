@@ -1,0 +1,9 @@
+﻿global using System.Text.Json.Nodes;
+global using BlazorA2UI.Catalogs;
+global using BlazorA2UI.Components;
+global using BlazorA2UI.Media;
+global using BlazorA2UI.Processing;
+global using Bunit;
+global using Microsoft.Extensions.DependencyInjection;
+global using Shouldly;
+global using Xunit;

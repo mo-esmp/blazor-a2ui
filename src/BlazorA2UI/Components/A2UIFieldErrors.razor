@@ -1,0 +1,17 @@
+@if (Outcome is { IsValid: false } outcome)
+{
+    <ul class="a2ui-field-errors" role="alert">
+        @foreach (string message in outcome.ErrorMessages)
+        {
+            <li>@message</li>
+        }
+    </ul>
+}
+
+@code {
+    /// <summary>
+    /// Gets or sets the check result whose error messages are shown.
+    /// </summary>
+    [Parameter]
+    public CheckOutcome? Outcome { get; set; }
+}

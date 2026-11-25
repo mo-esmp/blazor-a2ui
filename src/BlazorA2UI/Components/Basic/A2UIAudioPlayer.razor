@@ -1,0 +1,22 @@
+@inherits A2UIComponentBase
+@inject IA2UIMediaResolver MediaResolver
+
+<figure class="@A2UIClasses.Join("a2ui-audio", WeightClass)" @attributes="AccessibilityAttributes()">
+    @if (MediaUrls.Resolve(MediaResolver, A2UIMediaKind.Audio, OptionalText("url"), Surface, Component) is { } source)
+    {
+        <audio src="@source" controls preload="none"></audio>
+    }
+    else
+    {
+        <div role="img" aria-label="Audio not loaded" class="a2ui-media-blocked">
+            <span class="a2ui-media-blocked-text">Audio not loaded</span>
+        </div>
+    }
+    @if (OptionalText("description") is { Length: > 0 } description)
+    {
+        <figcaption>@description</figcaption>
+    }
+</figure>
+
+@code {
+}

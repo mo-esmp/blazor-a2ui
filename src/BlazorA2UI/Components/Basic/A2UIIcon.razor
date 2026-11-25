@@ -1,0 +1,22 @@
+@inherits A2UIComponentBase
+
+@if (SvgPath() is { } path)
+{
+    <svg viewBox="0 0 24 24" class="@A2UIClasses.Join("a2ui-icon", WeightClass)" aria-hidden="true" focusable="false" @attributes="AccessibilityAttributes()">
+        <path d="@path" />
+    </svg>
+}
+else if (A2UIIcons.ClassFor(Raw("name") is JsonObject ? Property("name") : Raw("name")) is { } iconClass)
+{
+    <span class="@A2UIClasses.Join("a2ui-icon", iconClass, WeightClass)" aria-hidden="true" @attributes="AccessibilityAttributes()"></span>
+}
+
+@code {
+    /// <summary>
+    /// The icon's <c>svgPath</c> when it has one and it is valid SVG path data, or null.
+    /// </summary>
+    private string? SvgPath() =>
+        Raw("name") is JsonObject name && name.ContainsKey("svgPath")
+            ? A2UIIcons.ValidPath(A2UIValues.AsString(Surface.Evaluate(name["svgPath"], Context, out _)))
+            : null;
+}

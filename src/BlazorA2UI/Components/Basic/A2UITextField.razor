@@ -1,0 +1,26 @@
+@inherits A2UIComponentBase
+
+@{
+    CheckOutcome checks = Checks();
+    string variant = A2UIValues.AsString(Raw("variant")) ?? "shortText";
+}
+<label class="@A2UIClasses.Join("a2ui-field", "a2ui-text-field", checks.IsValid ? null : "a2ui-invalid", WeightClass)" @attributes="AccessibilityAttributes()">
+    <span class="a2ui-field-label">@Text("label")</span>
+    @if (variant == "longText")
+    {
+        <textarea value="@Text("value")" placeholder="@OptionalText("placeholder")" aria-invalid="@(!checks.IsValid)" @onchange="OnChange"></textarea>
+    }
+    else
+    {
+        <input type="@(variant switch { "number" => "number", "obscured" => "password", _ => "text" })" value="@Text("value")"
+               placeholder="@OptionalText("placeholder")" aria-invalid="@(!checks.IsValid)" @onchange="OnChange" />
+    }
+</label>
+<A2UIFieldErrors Outcome="checks" />
+
+@code {
+    /// <summary>
+    /// Writes the committed text to the bound value.
+    /// </summary>
+    private void OnChange(ChangeEventArgs e) => Write("value", JsonValue.Create(e.Value?.ToString() ?? string.Empty));
+}

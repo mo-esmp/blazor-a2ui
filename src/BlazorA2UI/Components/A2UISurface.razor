@@ -1,0 +1,158 @@
+@implements IDisposable
+@inject MessageProcessor InjectedProcessor
+
+@if (_surface?.Root is { } root)
+{
+    <CascadingValue Value="this" IsFixed="true">
+        <div class="a2ui-surface">
+            <A2UIChild Surface="_surface" Component="root" Context="_surface.RootContext" Depth="0" />
+        </div>
+    </CascadingValue>
+}
+else
+{
+    @Placeholder
+}
+
+@code {
+    /// <summary>
+    /// The surface being shown, once the agent has created it.
+    /// </summary>
+    private Surface? _surface;
+
+    /// <summary>
+    /// The processor the component is subscribed to.
+    /// </summary>
+    private MessageProcessor? _subscribed;
+
+    /// <summary>
+    /// Gets or sets the id of the surface to show.
+    /// </summary>
+    [Parameter]
+    [EditorRequired]
+    public string SurfaceId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the processor that holds the surface, or null to use the one registered with <c>AddA2UI</c>.
+    /// </summary>
+    [Parameter]
+    public MessageProcessor? Processor { get; set; }
+
+    /// <summary>
+    /// Gets or sets a callback that runs after a component action has been dispatched.
+    /// </summary>
+    [Parameter]
+    public EventCallback<A2UIActionEventArgs> OnAction { get; set; }
+
+    /// <summary>
+    /// Gets or sets what to show until the surface exists and has a root component.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? Placeholder { get; set; }
+
+    /// <summary>
+    /// Subscribes to the processor and finds the surface when the parameters change.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        MessageProcessor processor = Processor ?? InjectedProcessor;
+        if (!ReferenceEquals(processor, _subscribed))
+        {
+            Unsubscribe();
+            processor.SurfaceCreated += OnSurfaceCreated;
+            processor.SurfaceDeleted += OnSurfaceDeleted;
+            _subscribed = processor;
+        }
+
+        Attach(processor.Surfaces.TryGetValue(SurfaceId, out Surface? surface) ? surface : null);
+    }
+
+    /// <summary>
+    /// Tells the page that an action ran.
+    /// </summary>
+    internal Task NotifyActionAsync(ComponentInstance component, EvaluationContext context) =>
+        OnAction.HasDelegate
+            ? OnAction.InvokeAsync(new A2UIActionEventArgs(SurfaceId, component.Id, context))
+            : Task.CompletedTask;
+
+    /// <summary>
+    /// Unsubscribes from the processor and the surface.
+    /// </summary>
+    public void Dispose()
+    {
+        Attach(null);
+        Unsubscribe();
+    }
+
+    /// <summary>
+    /// Switches to another surface, or to none, moving the change subscription with it.
+    /// </summary>
+    private void Attach(Surface? surface)
+    {
+        if (ReferenceEquals(surface, _surface))
+        {
+            return;
+        }
+
+        if (_surface is not null)
+        {
+            _surface.Changed -= OnSurfaceChanged;
+        }
+
+        _surface = surface;
+        if (_surface is not null)
+        {
+            _surface.Changed += OnSurfaceChanged;
+        }
+    }
+
+    /// <summary>
+    /// Stops listening for surfaces being created and deleted.
+    /// </summary>
+    private void Unsubscribe()
+    {
+        if (_subscribed is null)
+        {
+            return;
+        }
+
+        _subscribed.SurfaceCreated -= OnSurfaceCreated;
+        _subscribed.SurfaceDeleted -= OnSurfaceDeleted;
+        _subscribed = null;
+    }
+
+    /// <summary>
+    /// Shows the surface when the agent creates it.
+    /// </summary>
+    private void OnSurfaceCreated(Surface surface)
+    {
+        if (surface.SurfaceId == SurfaceId)
+        {
+            _ = InvokeAsync(() =>
+            {
+                Attach(surface);
+                StateHasChanged();
+            });
+        }
+    }
+
+    /// <summary>
+    /// Clears the surface when the agent deletes it.
+    /// </summary>
+    private void OnSurfaceDeleted(Surface surface)
+    {
+        if (ReferenceEquals(surface, _surface))
+        {
+            _ = InvokeAsync(() =>
+            {
+                Attach(null);
+                StateHasChanged();
+            });
+        }
+    }
+
+    /// <summary>
+    /// Re-renders when the surface's components or data change. The event can come from any thread.
+    /// </summary>
+    private void OnSurfaceChanged() => _ = InvokeAsync(StateHasChanged);
+}

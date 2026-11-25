@@ -1,0 +1,28 @@
+@inherits A2UIComponentBase
+
+<div class="@A2UIClasses.Join("a2ui-modal-host", WeightClass)" @attributes="AccessibilityAttributes()">
+    <div class="a2ui-modal-trigger" @onclick="() => _open = true">
+        @foreach ((ComponentInstance trigger, EvaluationContext triggerContext) in Children("trigger"))
+        {
+            <A2UIChild Surface="Surface" Component="trigger" Context="triggerContext" Depth="Depth + 1" />
+        }
+    </div>
+    @if (_open)
+    {
+        <div class="a2ui-modal-backdrop" @onclick="() => _open = false"></div>
+        <div role="dialog" aria-modal="true" class="a2ui-modal">
+            <button type="button" class="a2ui-modal-close" aria-label="Close" @onclick="() => _open = false">×</button>
+            @foreach ((ComponentInstance content, EvaluationContext contentContext) in Children("content"))
+            {
+                <A2UIChild Surface="Surface" Component="content" Context="contentContext" Depth="Depth + 1" />
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// Whether the modal's content is shown.
+    /// </summary>
+    private bool _open;
+}

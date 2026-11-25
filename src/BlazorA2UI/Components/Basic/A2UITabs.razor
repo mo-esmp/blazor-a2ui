@@ -1,0 +1,61 @@
+@inherits A2UIComponentBase
+
+@{
+    List<(string Title, string ChildId)> tabs = Tabs();
+    int selected = Math.Clamp(_selected, 0, Math.Max(0, tabs.Count - 1));
+}
+<div class="@A2UIClasses.Join("a2ui-tabs", WeightClass)" @attributes="AccessibilityAttributes()">
+    <div role="tablist" class="a2ui-tab-list">
+        @for (int i = 0; i < tabs.Count; i++)
+        {
+            int index = i;
+            <button type="button" role="tab" aria-selected="@(index == selected ? "true" : "false")"
+                    class="@A2UIClasses.Join("a2ui-tab", index == selected ? "a2ui-tab-selected" : null)" @onclick="() => _selected = index">@tabs[index].Title</button>
+        }
+    </div>
+    @if (tabs.Count > 0 && Surface.TryGetChild(Component, tabs[selected].ChildId, out ComponentInstance? child))
+    {
+        <div role="tabpanel" class="a2ui-tab-panel">
+            <A2UIChild Surface="Surface" Component="child" Context="Context" Depth="Depth + 1" />
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// The most tabs rendered.
+    /// </summary>
+    internal const int MaxTabs = 100;
+
+    /// <summary>
+    /// The index of the selected tab.
+    /// </summary>
+    private int _selected;
+
+    /// <summary>
+    /// The tabs, as titles and child ids. Malformed tabs are skipped.
+    /// </summary>
+    private List<(string, string)> Tabs()
+    {
+        List<(string, string)> tabs = [];
+        if (Raw("tabs") is not JsonArray raw)
+        {
+            return tabs;
+        }
+
+        foreach (JsonNode? item in raw)
+        {
+            if (tabs.Count >= MaxTabs)
+            {
+                break;
+            }
+
+            if (item is JsonObject tab && A2UIValues.AsString(tab["child"]) is { } childId)
+            {
+                tabs.Add((A2UIValues.ToDisplayString(Surface.Evaluate(tab["title"], Context, out _)), childId));
+            }
+        }
+
+        return tabs;
+    }
+}

@@ -1,0 +1,59 @@
+@inject A2UIComponentRegistry Registry
+
+@if (Depth > MaxDepth)
+{
+    <div class="a2ui-placeholder" role="note">Content nested too deeply.</div>
+}
+else if (Registry.TryGetRenderer(Component, out Type? renderer))
+{
+    <DynamicComponent Type="renderer" Parameters="Parameters()" />
+}
+else
+{
+    <A2UIPlaceholder Surface="Surface" Component="Component" Context="Context" Depth="Depth" />
+}
+
+@code {
+    /// <summary>
+    /// The deepest component rendered; deeper ones render a note. Matches the default tree depth limit.
+    /// </summary>
+    internal const int MaxDepth = 50;
+
+    /// <summary>
+    /// Gets or sets the surface the component belongs to.
+    /// </summary>
+    [Parameter]
+    [EditorRequired]
+    public Surface Surface { get; set; } = null!; // Blazor sets every [EditorRequired] parameter before the first render.
+
+    /// <summary>
+    /// Gets or sets the component to render.
+    /// </summary>
+    [Parameter]
+    [EditorRequired]
+    public ComponentInstance Component { get; set; } = null!; // Set by Blazor before the first render, like Surface.
+
+    /// <summary>
+    /// Gets or sets the data scope of the component.
+    /// </summary>
+    [Parameter]
+    [EditorRequired]
+    public EvaluationContext Context { get; set; } = null!; // Set by Blazor before the first render, like Surface.
+
+    /// <summary>
+    /// Gets or sets how deep the component is in the rendered tree.
+    /// </summary>
+    [Parameter]
+    public int Depth { get; set; }
+
+    /// <summary>
+    /// The parameters passed to the renderer.
+    /// </summary>
+    private Dictionary<string, object> Parameters() => new(StringComparer.Ordinal)
+    {
+        [nameof(A2UIComponentBase.Surface)] = Surface,
+        [nameof(A2UIComponentBase.Component)] = Component,
+        [nameof(A2UIComponentBase.Context)] = Context,
+        [nameof(A2UIComponentBase.Depth)] = Depth,
+    };
+}

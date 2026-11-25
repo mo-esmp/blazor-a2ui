@@ -1,0 +1,122 @@
+@inherits A2UIComponentBase
+
+@{
+    CheckOutcome checks = Checks();
+    bool single = A2UIValues.AsString(Raw("variant")) == "mutuallyExclusive";
+    HashSet<string> selected = Selected();
+}
+<fieldset class="@A2UIClasses.Join("a2ui-field", "a2ui-choice-picker", A2UIClasses.DisplayStyle(Raw("displayStyle")) ?? "a2ui-choices-checkbox", checks.IsValid ? null : "a2ui-invalid", WeightClass)" @attributes="AccessibilityAttributes()">
+    @if (OptionalText("label") is { Length: > 0 } legendText)
+    {
+        <legend class="a2ui-field-label">@legendText</legend>
+    }
+    @if (Raw("filterable") is JsonValue filterable && filterable.TryGetValue(out bool isFilterable) && isFilterable)
+    {
+        <input type="search" class="a2ui-choice-filter" aria-label="Filter options" value="@_filter" @oninput="e => _filter = e.Value?.ToString() ?? string.Empty" />
+    }
+    @foreach ((string optionValue, string optionLabel) in Options())
+    {
+        if (_filter.Length > 0 && !optionLabel.Contains(_filter, StringComparison.CurrentCultureIgnoreCase))
+        {
+            continue;
+        }
+
+        <label class="a2ui-choice">
+            <input type="@(single ? "radio" : "checkbox")" name="@_group" checked="@selected.Contains(optionValue)" @onchange="e => Toggle(optionValue, single, e)" />
+            <span>@optionLabel</span>
+        </label>
+    }
+</fieldset>
+<A2UIFieldErrors Outcome="checks" />
+
+@code {
+    /// <summary>
+    /// The most options rendered.
+    /// </summary>
+    internal const int MaxOptions = 500;
+
+    /// <summary>
+    /// The radio group name, unique to this instance.
+    /// </summary>
+    private readonly string _group = "a2ui-choice-" + Guid.NewGuid().ToString("N");
+
+    /// <summary>
+    /// The text the options are filtered by, when the picker is filterable.
+    /// </summary>
+    private string _filter = string.Empty;
+
+    /// <summary>
+    /// The options, as stable values and display labels. Malformed options are skipped.
+    /// </summary>
+    private List<(string Value, string Label)> Options()
+    {
+        List<(string, string)> options = [];
+        if (Raw("options") is not JsonArray raw)
+        {
+            return options;
+        }
+
+        foreach (JsonNode? item in raw)
+        {
+            if (options.Count >= MaxOptions)
+            {
+                break;
+            }
+
+            if (item is JsonObject option && A2UIValues.AsString(option["value"]) is { } value)
+            {
+                options.Add((value, A2UIValues.ToDisplayString(Surface.Evaluate(option["label"], Context, out _))));
+            }
+        }
+
+        return options;
+    }
+
+    /// <summary>
+    /// The currently selected values.
+    /// </summary>
+    private HashSet<string> Selected()
+    {
+        HashSet<string> selected = new(StringComparer.Ordinal);
+        if (Property("value") is JsonArray values)
+        {
+            foreach (JsonNode? value in values)
+            {
+                if (A2UIValues.AsString(value) is { } text)
+                {
+                    selected.Add(text);
+                }
+            }
+        }
+
+        return selected;
+    }
+
+    /// <summary>
+    /// Writes the new selection: the one value for a mutually exclusive picker, or the set with this value added or removed.
+    /// </summary>
+    private void Toggle(string value, bool single, ChangeEventArgs e)
+    {
+        bool on = e.Value is true || string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase) || (single && e.Value is string);
+        HashSet<string> selected = single ? new HashSet<string>(StringComparer.Ordinal) : Selected();
+        if (on)
+        {
+            selected.Add(value);
+        }
+        else
+        {
+            selected.Remove(value);
+        }
+
+        JsonArray next = [];
+        foreach ((string option, string _) in Options())
+        {
+            if (selected.Contains(option))
+            {
+                next.Add(option);
+            }
+        }
+
+        Write("value", next);
+    }
+}

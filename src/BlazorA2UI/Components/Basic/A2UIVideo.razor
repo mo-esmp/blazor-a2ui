@@ -1,0 +1,17 @@
+@inherits A2UIComponentBase
+@inject IA2UIMediaResolver MediaResolver
+
+@if (MediaUrls.Resolve(MediaResolver, A2UIMediaKind.Video, OptionalText("url"), Surface, Component) is { } source)
+{
+    <video src="@source" poster="@MediaUrls.Resolve(MediaResolver, A2UIMediaKind.VideoPoster, OptionalText("posterUrl"), Surface, Component)"
+           controls preload="none" class="@A2UIClasses.Join("a2ui-video", WeightClass)" @attributes="AccessibilityAttributes()"></video>
+}
+else
+{
+    <div role="img" aria-label="Video not loaded" class="@A2UIClasses.Join("a2ui-media-blocked", "a2ui-video", WeightClass)">
+        <span class="a2ui-media-blocked-text">Video not loaded</span>
+    </div>
+}
+
+@code {
+}

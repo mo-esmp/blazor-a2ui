@@ -1,0 +1,201 @@
+/*
+ * BlazorA2UI default theme.
+ *
+ * Every class here is a fixed name chosen by the renderer from an enumeration; no model value reaches a class
+ * name or a style. The sheet loads no fonts, images or other URLs. Override the custom properties below, or any
+ * rule, in the host's own stylesheet.
+ */
+
+.a2ui-surface {
+    --a2ui-gap: 0.5rem;
+    --a2ui-radius: 0.5rem;
+    --a2ui-border: #d0d7de;
+    --a2ui-muted: #57606a;
+    --a2ui-accent: #0969da;
+    --a2ui-accent-text: #ffffff;
+    --a2ui-surface-bg: #ffffff;
+    --a2ui-error: #cf222e;
+    font: inherit;
+    color: inherit;
+}
+
+.a2ui-surface *,
+.a2ui-surface *::before,
+.a2ui-surface *::after {
+    box-sizing: border-box;
+}
+
+/* Layout */
+
+.a2ui-row,
+.a2ui-column,
+.a2ui-list {
+    display: flex;
+    gap: var(--a2ui-gap);
+    min-width: 0;
+}
+
+.a2ui-row { flex-direction: row; flex-wrap: wrap; }
+.a2ui-column { flex-direction: column; }
+.a2ui-list { overflow: auto; }
+.a2ui-list.a2ui-direction-vertical { flex-direction: column; }
+.a2ui-list.a2ui-direction-horizontal { flex-direction: row; }
+
+.a2ui-justify-start { justify-content: flex-start; }
+.a2ui-justify-center { justify-content: center; }
+.a2ui-justify-end { justify-content: flex-end; }
+.a2ui-justify-space-between { justify-content: space-between; }
+.a2ui-justify-space-around { justify-content: space-around; }
+.a2ui-justify-space-evenly { justify-content: space-evenly; }
+.a2ui-justify-stretch { justify-content: stretch; }
+
+.a2ui-align-start { align-items: flex-start; }
+.a2ui-align-center { align-items: center; }
+.a2ui-align-end { align-items: flex-end; }
+.a2ui-align-stretch { align-items: stretch; }
+
+.a2ui-weight-1 { flex: 1 1 0; }
+.a2ui-weight-2 { flex: 2 1 0; }
+.a2ui-weight-3 { flex: 3 1 0; }
+.a2ui-weight-4 { flex: 4 1 0; }
+.a2ui-weight-5 { flex: 5 1 0; }
+.a2ui-weight-6 { flex: 6 1 0; }
+.a2ui-weight-7 { flex: 7 1 0; }
+.a2ui-weight-8 { flex: 8 1 0; }
+.a2ui-weight-9 { flex: 9 1 0; }
+.a2ui-weight-10 { flex: 10 1 0; }
+.a2ui-weight-11 { flex: 11 1 0; }
+.a2ui-weight-12 { flex: 12 1 0; }
+
+.a2ui-card {
+    border: 1px solid var(--a2ui-border);
+    border-radius: var(--a2ui-radius);
+    background: var(--a2ui-surface-bg);
+    padding: 1rem;
+}
+
+.a2ui-divider { border: 0; background: var(--a2ui-border); margin: 0; }
+.a2ui-divider.a2ui-axis-horizontal { height: 1px; width: 100%; }
+.a2ui-divider.a2ui-axis-vertical { width: 1px; align-self: stretch; }
+
+/* Text */
+
+.a2ui-text { margin: 0; overflow-wrap: anywhere; }
+.a2ui-text-caption { font-size: 0.85em; color: var(--a2ui-muted); }
+
+/* Media */
+
+.a2ui-image { display: block; max-width: 100%; }
+.a2ui-image-icon { width: 24px; height: 24px; }
+.a2ui-image-avatar { width: 40px; height: 40px; border-radius: 50%; }
+.a2ui-image-small-feature { width: 100%; max-height: 120px; }
+.a2ui-image-medium-feature { width: 100%; max-height: 240px; }
+.a2ui-image-large-feature { width: 100%; max-height: 400px; }
+.a2ui-image-header { width: 100%; max-height: 240px; }
+
+.a2ui-fit-contain { object-fit: contain; }
+.a2ui-fit-cover { object-fit: cover; }
+.a2ui-fit-fill { object-fit: fill; }
+.a2ui-fit-none { object-fit: none; }
+.a2ui-fit-scale-down { object-fit: scale-down; }
+
+.a2ui-video, .a2ui-audio { display: block; width: 100%; }
+
+.a2ui-media-blocked {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 3rem;
+    min-width: 3rem;
+    border: 1px dashed var(--a2ui-border);
+    border-radius: var(--a2ui-radius);
+    color: var(--a2ui-muted);
+    background: repeating-linear-gradient(45deg, transparent 0 8px, rgba(127, 127, 127, 0.08) 8px 16px);
+    font-size: 0.85em;
+}
+
+.a2ui-media-blocked.a2ui-image-icon .a2ui-media-blocked-text,
+.a2ui-media-blocked.a2ui-image-avatar .a2ui-media-blocked-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+}
+
+/* Icons: class hooks only. The renderer emits a2ui-icon-{name}; the host supplies glyphs, for example with an
+   icon font or mask images of its own. An svgPath icon draws itself. */
+
+.a2ui-icon {
+    display: inline-block;
+    width: 1.5em;
+    height: 1.5em;
+    vertical-align: middle;
+    fill: currentColor;
+}
+
+/* Inputs */
+
+.a2ui-button {
+    font: inherit;
+    cursor: pointer;
+    border-radius: var(--a2ui-radius);
+    padding: 0.4rem 0.9rem;
+    border: 1px solid var(--a2ui-border);
+    background: var(--a2ui-surface-bg);
+    color: inherit;
+}
+
+.a2ui-button-primary { background: var(--a2ui-accent); border-color: var(--a2ui-accent); color: var(--a2ui-accent-text); }
+.a2ui-button-borderless { border-color: transparent; background: transparent; }
+.a2ui-button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.a2ui-field { display: flex; flex-direction: column; gap: 0.25rem; border: 0; padding: 0; margin: 0; min-width: 0; }
+.a2ui-field-label { font-size: 0.9em; color: var(--a2ui-muted); padding: 0; }
+.a2ui-field input,
+.a2ui-field textarea,
+.a2ui-field select {
+    font: inherit;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--a2ui-border);
+    border-radius: calc(var(--a2ui-radius) / 2);
+}
+
+.a2ui-invalid input,
+.a2ui-invalid textarea { border-color: var(--a2ui-error); }
+.a2ui-field-errors { margin: 0.25rem 0 0; padding-left: 1.1rem; color: var(--a2ui-error); font-size: 0.85em; }
+
+.a2ui-checkbox,
+.a2ui-choice { display: inline-flex; align-items: center; gap: 0.4rem; }
+.a2ui-choices-chips { flex-direction: row; flex-wrap: wrap; }
+.a2ui-choices-chips .a2ui-choice { border: 1px solid var(--a2ui-border); border-radius: 999px; padding: 0.2rem 0.7rem; }
+.a2ui-slider { display: flex; align-items: center; gap: var(--a2ui-gap); }
+.a2ui-slider-value { min-width: 3ch; text-align: end; }
+
+/* Tabs and modal */
+
+.a2ui-tab-list { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--a2ui-border); }
+.a2ui-tab { font: inherit; background: none; border: 0; border-bottom: 2px solid transparent; padding: 0.4rem 0.8rem; cursor: pointer; color: inherit; }
+.a2ui-tab-selected { border-bottom-color: var(--a2ui-accent); }
+.a2ui-tab-panel { padding-top: var(--a2ui-gap); }
+
+.a2ui-modal-trigger { display: contents; }
+.a2ui-modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 1000; }
+.a2ui-modal {
+    position: fixed;
+    z-index: 1001;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    max-width: min(90vw, 40rem);
+    max-height: 85vh;
+    overflow: auto;
+    background: var(--a2ui-surface-bg);
+    border-radius: var(--a2ui-radius);
+    padding: 1.25rem;
+}
+.a2ui-modal-close { position: absolute; top: 0.4rem; right: 0.5rem; background: none; border: 0; font-size: 1.25rem; cursor: pointer; color: inherit; }
+
+/* Unknown or unsafe components */
+
+.a2ui-placeholder { color: var(--a2ui-muted); font-size: 0.85em; border: 1px dashed var(--a2ui-border); border-radius: var(--a2ui-radius); padding: 0.25rem 0.5rem; }
