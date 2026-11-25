@@ -76,6 +76,7 @@ public sealed class DataModel
             return;
         }
 
+        CheckWritable(segments, path);
         var parent = Vivify(segments);
         var last = segments[^1];
         switch (parent)
@@ -148,6 +149,66 @@ public sealed class DataModel
 
     /// <summary>Returns a deep copy of the whole model.</summary>
     public JsonNode? Snapshot() => _root?.DeepClone();
+
+    /// <summary>
+    /// Walks the path without changing anything and throws when the write would fail, so a
+    /// rejected write never leaves half-created containers behind.
+    /// </summary>
+    private void CheckWritable(IReadOnlyList<string> segments, string path)
+    {
+        if (_root is not null and not JsonObject and not JsonArray)
+        {
+            throw new A2UIDataException($"Cannot set path '{path}': the root is not a container.");
+        }
+
+        JsonNode? current = _root ?? new JsonObject();
+        var creating = false; // true once the walk has left the existing data
+        for (var i = 0; i < segments.Count; i++)
+        {
+            var segment = segments[i];
+            var isLast = i == segments.Count - 1;
+            if (creating)
+            {
+                // A created container is a list exactly when its segment is an index.
+                if (TryParseIndex(segment, out _))
+                {
+                    ParseWriteIndex(segment, path);
+                }
+
+                continue;
+            }
+
+            JsonNode? child = null;
+            switch (current)
+            {
+                case JsonObject obj:
+                    obj.TryGetPropertyValue(segment, out child);
+                    break;
+                case JsonArray arr:
+                    var index = ParseWriteIndex(segment, path);
+                    child = index < arr.Count ? arr[index] : null;
+                    break;
+            }
+
+            if (isLast)
+            {
+                break;
+            }
+
+            if (child is null)
+            {
+                creating = true;
+                continue;
+            }
+
+            if (child is not JsonObject && child is not JsonArray)
+            {
+                throw new A2UIDataException($"Cannot set path '{path}': '{segment}' holds a primitive value.");
+            }
+
+            current = child;
+        }
+    }
 
     private JsonNode Vivify(IReadOnlyList<string> segments)
     {

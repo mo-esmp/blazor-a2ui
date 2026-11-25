@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 
 namespace BlazorA2UI.Text;
@@ -8,9 +7,8 @@ namespace BlazorA2UI.Text;
 /// used for component ids, catalog entity names, argument keys and extension keys.
 /// </summary>
 /// <remarks>
-/// .NET has no XID property tables, so this approximates XID_Start and XID_Continue with
-/// their defining general categories (L*, Nl / L*, Nl, Mn, Mc, Nd, Pc), which agree for
-/// every code point used in practice.
+/// .NET has no XID property tables, so exact tables from the Unicode Character Database are
+/// generated into <see cref="Uax31Tables"/>.
 /// </remarks>
 public static class Uax31
 {
@@ -42,17 +40,30 @@ public static class Uax31
         return true;
     }
 
-    public static bool IsXidStart(Rune rune) => Rune.GetUnicodeCategory(rune) switch
-    {
-        UnicodeCategory.UppercaseLetter or UnicodeCategory.LowercaseLetter or UnicodeCategory.TitlecaseLetter
-            or UnicodeCategory.ModifierLetter or UnicodeCategory.OtherLetter or UnicodeCategory.LetterNumber => true,
-        _ => false,
-    };
+    public static bool IsXidStart(Rune rune) => InRanges(Uax31Tables.XidStart, rune.Value);
 
-    public static bool IsXidContinue(Rune rune) => IsXidStart(rune) || Rune.GetUnicodeCategory(rune) switch
+    public static bool IsXidContinue(Rune rune) => InRanges(Uax31Tables.XidContinue, rune.Value);
+
+    private static bool InRanges(int[] ranges, int value)
     {
-        UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark
-            or UnicodeCategory.DecimalDigitNumber or UnicodeCategory.ConnectorPunctuation => true,
-        _ => false,
-    };
+        int lo = 0, hi = (ranges.Length / 2) - 1;
+        while (lo <= hi)
+        {
+            var mid = (lo + hi) >>> 1;
+            if (value < ranges[2 * mid])
+            {
+                hi = mid - 1;
+            }
+            else if (value > ranges[(2 * mid) + 1])
+            {
+                lo = mid + 1;
+            }
+            else
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

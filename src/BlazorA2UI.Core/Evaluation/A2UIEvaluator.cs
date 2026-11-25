@@ -183,7 +183,7 @@ public sealed class A2UIEvaluator
                     $"The call to '{name}' names no catalogId and its surface has no default catalogId.");
         }
 
-        if (!Catalogs.TryGet(catalogId, out var catalog))
+        if (!TryGetCatalog(context, catalogId, out var catalog))
         {
             throw scope.Mode == EvaluationMode.AgentCall
                 ? new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Catalog '{catalogId}' is not registered on this renderer.")
@@ -326,7 +326,7 @@ public sealed class A2UIEvaluator
             if (scope.Mode == EvaluationMode.AgentCall)
             {
                 // Static nested calls are checked before any argument expression runs.
-                PreflightNestedCalls(rawArgs, catalog, 0);
+                PreflightNestedCalls(rawArgs, catalog, context, 0);
             }
 
             foreach (var (key, raw) in rawArgs)
@@ -351,7 +351,14 @@ public sealed class A2UIEvaluator
         return args;
     }
 
-    private void PreflightNestedCalls(JsonNode? node, Catalog defaultCatalog, int depth)
+    /// <summary>
+    /// Finds a catalog: through the surface when there is one, so only the catalogs it was
+    /// created with are visible, and in the whole registry for detached evaluations.
+    /// </summary>
+    private bool TryGetCatalog(EvaluationContext context, string catalogId, out Catalog catalog) =>
+        context.Surface is { } surface ? surface.TryGetCatalog(catalogId, out catalog) : Catalogs.TryGet(catalogId, out catalog);
+
+    private void PreflightNestedCalls(JsonNode? node, Catalog defaultCatalog, EvaluationContext context, int depth)
     {
         if (depth > MaxDepth)
         {
@@ -364,7 +371,7 @@ public sealed class A2UIEvaluator
                 if (A2UIValues.AsString(obj["@call"]) is { } nested && !nested.StartsWith('@'))
                 {
                     var catalog = defaultCatalog;
-                    if (A2UIValues.AsString(obj["catalogId"]) is { } id && !Catalogs.TryGet(id, out catalog))
+                    if (A2UIValues.AsString(obj["catalogId"]) is { } id && !TryGetCatalog(context, id, out catalog))
                     {
                         throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Catalog '{id}' is not registered on this renderer.");
                     }
@@ -375,14 +382,14 @@ public sealed class A2UIEvaluator
 
                 foreach (var (_, child) in obj)
                 {
-                    PreflightNestedCalls(child, defaultCatalog, depth + 1);
+                    PreflightNestedCalls(child, defaultCatalog, context, depth + 1);
                 }
 
                 break;
             case JsonArray arr:
                 foreach (var item in arr)
                 {
-                    PreflightNestedCalls(item, defaultCatalog, depth + 1);
+                    PreflightNestedCalls(item, defaultCatalog, context, depth + 1);
                 }
 
                 break;

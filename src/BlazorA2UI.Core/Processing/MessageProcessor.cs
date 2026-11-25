@@ -380,20 +380,34 @@ public sealed class MessageProcessor
             body["sendDataModel"] is JsonValue sdm && sdm.GetValueKind() == JsonValueKind.True,
             metadata);
 
-        using (surface.BatchChanges())
+        try
         {
-            if (body["dataModel"] is JsonObject dataModel)
+            // The surface is built and validated first, and only published once it is whole,
+            // so a rejected createSurface leaves no half-built surface behind.
+            using (surface.BatchChanges())
             {
-                surface.DataModel.Set("/", dataModel);
-            }
+                if (body["dataModel"] is JsonObject dataModel)
+                {
+                    surface.DataModel.Set("/", dataModel);
+                }
 
-            _surfaces[surfaceId] = surface;
-            if (body["components"] is { } components)
-            {
-                ApplyComponents(surface, components);
+                if (body["components"] is { } components)
+                {
+                    ApplyComponents(surface, components);
+                }
             }
         }
+        catch
+        {
+            lock (_usedSurfaceIds)
+            {
+                _usedSurfaceIds.Remove(surfaceId);
+            }
 
+            throw;
+        }
+
+        _surfaces[surfaceId] = surface;
         SurfaceCreated?.Invoke(surface);
     }
 

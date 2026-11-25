@@ -14,6 +14,8 @@ namespace BlazorA2UI.Processing;
 /// </summary>
 internal static class ComponentParser
 {
+    private static readonly JsonObject AccessibilitySchema = new() { ["$ref"] = "common_types.json#/$defs/AccessibilityAttributes" };
+
     private static readonly string[] EnvelopeKeys = ["catalogId", "accessibility", "metadata", "checks"];
 
     public static ComponentInstance Parse(JsonObject raw, Surface surface, CatalogRegistry catalogs, A2UIValidationConfig? validation = null)
@@ -114,6 +116,11 @@ internal static class ComponentParser
                 {
                     throw new A2UIValidationException($"Component '{id}': unknown accessibility attribute '{key}'.");
                 }
+            }
+
+            if (validation is not null && SchemaCheck.Validate(a11y, AccessibilitySchema, null) is { } a11yProblem)
+            {
+                throw new A2UIValidationException($"Component '{id}': '@accessibility' {a11yProblem}.") { Path = "/@accessibility" };
             }
         }
 

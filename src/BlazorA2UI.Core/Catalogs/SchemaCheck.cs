@@ -137,23 +137,34 @@ internal static class SchemaCheck
         {
             if (schema[combiner] is JsonArray branches && branches.Count > 0)
             {
+                var exactlyOne = combiner == "oneOf";
                 string? first = null;
-                var matched = false;
+                var matches = 0;
                 foreach (var branch in branches)
                 {
                     var problem = Check(value, branch, document, depth + 1);
                     if (problem is null)
                     {
-                        matched = true;
-                        break;
+                        matches++;
+                        if (!exactlyOne || matches > 1)
+                        {
+                            break;
+                        }
+
+                        continue;
                     }
 
                     first ??= problem;
                 }
 
-                if (!matched)
+                if (matches == 0)
                 {
                     return branches.Count == 1 ? first : $"the value matches none of the allowed forms ({first})";
+                }
+
+                if (exactlyOne && matches > 1)
+                {
+                    return "the value matches more than one of the allowed forms";
                 }
             }
         }
