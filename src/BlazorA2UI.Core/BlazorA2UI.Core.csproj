@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>BlazorA2UI.Core</PackageId>
+    <Description>UI-framework-agnostic A2UI v1.0 renderer core for .NET: message processing, data model, data binding, function evaluation and validation.</Description>
+    <RootNamespace>BlazorA2UI</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BlazorA2UI.Core.Tests" />
+    <EmbeddedResource Include="Catalogs/Basic/catalog.json" LogicalName="BlazorA2UI.Catalogs.Basic.catalog.json" />
+    <EmbeddedResource Include="Schemas/common_types.json" LogicalName="BlazorA2UI.Schemas.common_types.json" />
+  </ItemGroup>
+
+</Project>
