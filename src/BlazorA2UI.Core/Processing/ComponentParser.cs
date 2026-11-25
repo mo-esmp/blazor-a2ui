@@ -3,7 +3,7 @@ using BlazorA2UI.Catalogs;
 using BlazorA2UI.Evaluation;
 using BlazorA2UI.Expressions;
 using BlazorA2UI.Model;
-using BlazorA2UI.Text;
+using BlazorA2UI.Unicode;
 
 namespace BlazorA2UI.Processing;
 

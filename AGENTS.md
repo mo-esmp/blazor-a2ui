@@ -9,8 +9,11 @@
   no UI dependency.
 * `src/BlazorA2UI` (package `BlazorA2UI`) holds the basic catalog as Razor components and enforces the rendering rules
   below.
-* `src/BlazorA2UI.Agent` (package `BlazorA2UI.Agent`) is for the agent side: message builders and a streaming endpoint.
-* `tests/BlazorA2UI.Core.Tests` holds the unit tests and the conformance tests.
+* `src/BlazorA2UI.Agent` (package `BlazorA2UI.Agent`) is for the agent side: component and message builders, a JSONL
+  writer and a validator. It depends on nothing but the core. The ASP.NET Core streaming endpoint goes in a separate
+  package, `BlazorA2UI.Agent.AspNetCore`.
+* `tests/BlazorA2UI.Core.Tests` holds the unit tests and the conformance tests. `tests/BlazorA2UI.Tests` and
+  `tests/BlazorA2UI.Agent.Tests` test the components and the agent side.
 
 ## Safety
 

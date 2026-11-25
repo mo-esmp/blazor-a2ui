@@ -2,7 +2,7 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using BlazorA2UI.Evaluation;
-using BlazorA2UI.Text;
+using BlazorA2UI.Unicode;
 
 namespace BlazorA2UI.Catalogs;
 

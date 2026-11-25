@@ -5,14 +5,17 @@ streams JSON messages that describe a UI, and the renderer draws it with native 
 keeps a data model, and sends the user's actions back.
 
 > **Status: preview.** The protocol core (`BlazorA2UI.Core`) passes Google's conformance
-> suites, and the Razor components (`BlazorA2UI`) render the whole basic catalog. The agent-side
-> helpers come next. Names may still change before the first release.
+> suites, and the Razor components (`BlazorA2UI`) render the whole basic catalog. The agent side
+> (`BlazorA2UI.Agent`) has its builders and validator; the rest of it is in progress. Names may
+> still change before the first release.
 >
 > | Part | Package | State |
 > | --- | --- | --- |
 > | Protocol core: messages, data model, bindings, functions, catalogs, validation, agent and renderer function calls | `BlazorA2UI.Core` | Done |
 > | Blazor components: the basic catalog as Razor components, with the safety rules below | `BlazorA2UI` | Done |
-> | Agent side: message builders, a streaming endpoint, and sample apps | `BlazorA2UI.Agent` | Planned (PR 3) |
+> | Agent side: component and message builders, a JSONL writer, a validator that mirrors the renderer | `BlazorA2UI.Agent` | Done |
+> | Agent side: messages from the renderer, renderer function calls, LLM prompts and response parsing | `BlazorA2UI.Agent` | Planned |
+> | Streaming endpoint for ASP.NET Core, and sample apps | `BlazorA2UI.Agent.AspNetCore` | Planned |
 
 ## Safety rules
 
@@ -151,8 +154,70 @@ the agent endpoint must allow your app's origin (CORS).
 | `tests/BlazorA2UI.Core.Tests` | | Unit and conformance tests. |
 | `src/BlazorA2UI` | `BlazorA2UI` | Razor components, the media allowlist and `a2ui.css`. |
 | `tests/BlazorA2UI.Tests` | | bUnit tests for the components and the rendering safety rules. |
-| `src/BlazorA2UI.Agent` | `BlazorA2UI.Agent` | Agent-side builders and endpoint. Planned (PR 3). |
-| `samples/` | | Blazor Server and WebAssembly sample apps and a sample agent. Planned (PR 3). |
+| `src/BlazorA2UI.Agent` | `BlazorA2UI.Agent` | Agent-side builders, writer and validator. No dependency beyond the core. |
+| `tests/BlazorA2UI.Agent.Tests` | | Tests for the builders and validator, including a strict check of every basic component. |
+| `src/BlazorA2UI.Agent.AspNetCore` | `BlazorA2UI.Agent.AspNetCore` | Streaming endpoint for ASP.NET Core. Planned. |
+| `samples/` | | Blazor Server and WebAssembly sample apps and a sample agent. Planned. |
+
+## Building UI on the agent side
+
+`BlazorA2UI.Agent` builds messages from typed components instead of hand-written JSON. Nest
+components as objects; the builder flattens the tree into the wire format, assigns ids, and
+writes bindings (`{"@path": ...}`) and calls (`{"@call": ...}`):
+
+```csharp
+using System.Text.Json.Nodes;
+using BlazorA2UI.Agent;
+using BlazorA2UI.Agent.Basic;
+
+A2UIValue email = A2UIValue.Path("/form/email");
+Column form = new()
+{
+    Children =
+    [
+        new Text { Content = BasicFunctions.FormatString("Hello, ${/user/name}") },
+        new TextField
+        {
+            Label = "Email",
+            Value = email,
+            Checks = [new A2UICheck(BasicFunctions.Email(email), "Enter a valid email.")],
+        },
+        new Button
+        {
+            Child = new Text { Content = "Subscribe" },
+            Action = A2UIAction.Event("subscribe", new Dictionary<string, A2UIValue> { ["email"] = email }),
+        },
+    ],
+};
+
+JsonObject message = A2UIMessages.CreateSurface("signup", form, dataModel: new JsonObject { ["user"] = new JsonObject { ["name"] = "Ada" } });
+```
+
+- **Ids.** The root gets `root`. Other components keep the `Id` you set, or get one built from the
+  nearest ancestor with an id, such as `root__text_1`. Set an `Id` on any part you will update
+  later: `A2UIMessages.UpdateComponents("signup", [newCard])` then replaces that part and leaves
+  the rest of the surface alone. `A2UIComponent.Ref("id")` places a component that is already on
+  the surface without sending it again.
+- **Lists from data.** `A2UIChildList.Template(rowComponent, "/people")` repeats a component for
+  each item; inside it, relative paths such as `A2UIValue.Path("name")` read the current item.
+- **Writing.** `A2UIMessageWriter` writes messages as JSON Lines (`application/jsonl`) and
+  flushes after each one, so the renderer draws as the agent streams.
+- **Checking before sending.** `A2UIMessageValidator` runs each message through the renderer core
+  with the same catalogs and reports what a renderer would reject. It keeps the surfaces it has
+  seen, so a message is checked against the ones before it. Pass `A2UIValidationConfig.Strict` to
+  also require that every update leaves a complete tree.
+
+```csharp
+using A2UIMessageValidator validator = new();
+A2UIValidationResult result = validator.Validate(message);
+if (!result.IsValid)
+{
+    // result.Errors holds the renderer's error codes and paths, ready to hand back to the model.
+}
+```
+
+Custom components derive from `A2UIComponent` and write their properties through
+`A2UIComponentWriter`.
 
 ## Using the core directly (available now)
 

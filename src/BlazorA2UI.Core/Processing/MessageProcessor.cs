@@ -8,7 +8,7 @@ using BlazorA2UI.Data;
 using BlazorA2UI.Evaluation;
 using BlazorA2UI.Model;
 using BlazorA2UI.Rpc;
-using BlazorA2UI.Text;
+using BlazorA2UI.Unicode;
 
 namespace BlazorA2UI.Processing;
 
@@ -386,6 +386,12 @@ public sealed class MessageProcessor : IDisposable
     public bool IsDisposed => _disposed;
 
     /// <summary>
+    /// Gets or sets whether a <c>callRendererFunction</c> message runs its function. The agent-side validator mirrors a
+    /// renderer without acting as one, so it turns this off: the envelope is still checked, but nothing runs or is sent.
+    /// </summary>
+    internal bool RunsRendererFunctions { get; set; } = true;
+
+    /// <summary>
     /// Calls an agent function on behalf of the host (<c>callAgentFunction</c>) and waits for the agent's answer.
     /// </summary>
     /// <param name="surfaceId">The surface the call belongs to.</param>
@@ -605,7 +611,11 @@ public sealed class MessageProcessor : IDisposable
                 break;
             case "callRendererFunction":
                 ValidateCallRendererFunction(body);
-                Track(HandleCallRendererFunctionAsync(body, state.UserActivated));
+                if (RunsRendererFunctions)
+                {
+                    Track(HandleCallRendererFunctionAsync(body, state.UserActivated));
+                }
+
                 break;
             case "agentFunctionResponse":
                 HandleAgentFunctionResponse(body);

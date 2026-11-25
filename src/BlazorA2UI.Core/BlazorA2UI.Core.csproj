@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="BlazorA2UI.Core.Tests" />
+    <InternalsVisibleTo Include="BlazorA2UI.Agent" />
     <EmbeddedResource Include="Catalogs/Basic/catalog.json" LogicalName="BlazorA2UI.Catalogs.Basic.catalog.json" />
     <EmbeddedResource Include="Schemas/common_types.json" LogicalName="BlazorA2UI.Schemas.common_types.json" />
   </ItemGroup>
