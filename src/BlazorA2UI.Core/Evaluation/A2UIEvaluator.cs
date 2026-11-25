@@ -403,9 +403,36 @@ public sealed class A2UIEvaluator
         context.Surface is { } surface ? surface.TryGetCatalog(catalogId, out catalog) : Catalogs.TryGet(catalogId, out catalog);
 
     /// <summary>
+    /// Checks the calls in a parsed <c>${...}</c> template before any part of it is evaluated, when the template is
+    /// evaluated for an agent's <c>callRendererFunction</c>. A call that crosses a boundary then fails without side
+    /// effects and takes priority over other errors in the same template; a function that cannot be resolved is left
+    /// for the evaluation to report. Outside an agent call this does nothing.
+    /// A function that interprets a string argument as a template (as <c>formatString</c> does) calls this; literal
+    /// text, including escaped <c>\${</c>, is never parsed as a call.
+    /// </summary>
+    /// <param name="parts">The template's parts, as <see cref="ExpressionParser.Parse(string, int)"/> returns them.</param>
+    /// <param name="context">The evaluation context, which decides which catalogs are visible.</param>
+    /// <param name="scope">The scope the template is evaluated in.</param>
+    /// <exception cref="A2UIException">A call in the template crosses a boundary or names an unknown catalog; nothing has run.</exception>
+    internal void PreflightTemplate(IReadOnlyList<JsonNode?> parts, EvaluationContext context, EvaluationScope scope)
+    {
+        if (scope.Mode != EvaluationMode.AgentCall
+            || (scope.CatalogOverride ?? context.Surface?.CatalogId) is not { } catalogId
+            || !TryGetCatalog(context, catalogId, out Catalog? catalog))
+        {
+            return;
+        }
+
+        foreach (JsonNode? part in parts)
+        {
+            PreflightNestedCalls(part, catalog, context, scope, inTemplate: true, 1);
+        }
+    }
+
+    /// <summary>
     /// Checks the static nested calls in an agent's <c>callRendererFunction</c> arguments before any of them runs, so a call that crosses a boundary fails without side effects.
-    /// Strings that hold <c>${...}</c> templates are checked too, since a function may evaluate them; there an unknown function is left for the
-    /// evaluation to report, so a boundary violation anywhere in the template takes priority.
+    /// String arguments are data and are not parsed here: a function that interprets one as a template checks it with
+    /// <see cref="PreflightTemplate"/> before evaluating it.
     /// </summary>
     /// <param name="node">The argument value to check.</param>
     /// <param name="defaultCatalog">The catalog that calls without a <c>catalogId</c> resolve to.</param>
@@ -450,24 +477,6 @@ public sealed class A2UIEvaluator
                 foreach (JsonNode? item in arr)
                 {
                     PreflightNestedCalls(item, defaultCatalog, context, scope, inTemplate, depth + 1);
-                }
-
-                break;
-            case JsonValue value when value.TryGetValue(out string? text) && text.Contains("${", StringComparison.Ordinal):
-                List<JsonNode?> parts;
-                try
-                {
-                    parts = ExpressionParser.Parse(text, depth);
-                }
-                catch (A2UIException)
-                {
-                    // Not a valid template: the function that reads it reports that, if it is one.
-                    return;
-                }
-
-                foreach (JsonNode? part in parts)
-                {
-                    PreflightNestedCalls(part, defaultCatalog, context, scope, inTemplate: true, depth + 1);
                 }
 
                 break;

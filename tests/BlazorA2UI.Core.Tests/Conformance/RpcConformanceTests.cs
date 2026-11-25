@@ -113,7 +113,7 @@ public sealed class RpcConformanceTests
         A2UIException? thrown = null;
         try
         {
-            processor.ProcessOrThrow(message.DeepClone(), new A2UIExecutionContext { IsUserActivated = userActivated });
+            processor.ProcessWithContextOrThrow(message.DeepClone(), new A2UIExecutionContext { IsUserActivated = userActivated });
         }
         catch (A2UIException ex)
         {
@@ -196,7 +196,10 @@ public sealed class RpcConformanceTests
                 Str(args["inboundResponse"]?["agentFunctionResponse"]?["functionCallId"]).ShouldBe(correlated);
             }
 
+            int sentBefore = outbound.Count;
             Task<JsonNode?> call = Start(processor, outboundCall);
+            outbound.Count.ShouldBe(sentBefore + 1, $"{name}: the call was not sent");
+            ConformanceAssert.Json(ExpectedEnvelope(outboundCall), outbound[^1], $"{name}: outbound callAgentFunction");
             processor.ProcessOrThrow(args["inboundResponse"]?.DeepClone());
             call.IsCompleted.ShouldBeTrue($"{name}: the call did not settle");
             ConformanceAssert.Json(expect["result"], await call, $"{name}: result");
@@ -425,6 +428,18 @@ public sealed class RpcConformanceTests
         }
 
         return new JsonObject { ["version"] = "1.0", ["agentFunctionResponse"] = body };
+    }
+
+    /// <summary>
+    /// The <c>callAgentFunction</c> envelope the processor must send for an outbound call spec: the spec without the
+    /// test-only <c>timeoutMs</c>, under the v1.0 envelope.
+    /// </summary>
+    /// <param name="spec">The case's <c>outboundCall</c>.</param>
+    private static JsonObject ExpectedEnvelope(JsonObject spec)
+    {
+        JsonObject body = spec.DeepClone().AsObject();
+        body.Remove("timeoutMs");
+        return new JsonObject { ["version"] = A2UIProtocol.Version, ["callAgentFunction"] = body };
     }
 
     /// <summary>

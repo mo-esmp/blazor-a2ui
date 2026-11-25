@@ -157,6 +157,7 @@ public static partial class BasicFunctions
     {
         string template = A2UIValues.ToDisplayString(i.Arg("value"));
         List<JsonNode?> parts = ExpressionParser.Parse(template);
+        i.Evaluator.PreflightTemplate(parts, i.Context, i.Scope);
         StringBuilder sb = new();
         bool wasInTemplate = i.Scope.InTemplate;
         i.Scope.InTemplate = true;
