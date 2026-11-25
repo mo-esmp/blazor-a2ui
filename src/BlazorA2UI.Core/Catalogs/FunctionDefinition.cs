@@ -3,44 +3,74 @@ using BlazorA2UI.Evaluation;
 
 namespace BlazorA2UI.Catalogs;
 
-/// <summary>Who may invoke a catalog function.</summary>
+/// <summary>
+/// Who may invoke a catalog function.
+/// </summary>
 public enum AllowedCallers
 {
-    /// <summary>Only the renderer (bindings, checks, actions). The default.</summary>
+    /// <summary>
+    /// Only the renderer (bindings, checks, actions). The default.
+    /// </summary>
     RendererOnly,
 
-    /// <summary>Only the agent, through <c>callRendererFunction</c>.</summary>
+    /// <summary>
+    /// Only the agent, through <c>callRendererFunction</c>.
+    /// </summary>
     AgentOnly,
 
-    /// <summary>Both the renderer and the agent.</summary>
+    /// <summary>
+    /// Both the renderer and the agent.
+    /// </summary>
     RendererOrAgent,
 }
 
-/// <summary>A function implementation that runs on the renderer.</summary>
+/// <summary>
+/// A function implementation that runs on the renderer.
+/// </summary>
 /// <param name="invocation">The resolved arguments and evaluation context.</param>
 public delegate ValueTask<JsonNode?> A2UIFunction(FunctionInvocation invocation);
 
-/// <summary>A catalog function: its declaration and, optionally, a renderer-side implementation.</summary>
+/// <summary>
+/// A catalog function: its declaration and, optionally, a renderer-side implementation.
+/// </summary>
 public sealed class FunctionDefinition
 {
+    /// <summary>
+    /// Creates a definition for the function <paramref name="name"/>.
+    /// </summary>
     public FunctionDefinition(string name)
     {
         Name = name;
     }
 
+    /// <summary>
+    /// Gets the function name, as calls use it in <c>@call</c>.
+    /// </summary>
     public string Name { get; }
 
-    /// <summary><c>string</c>, <c>number</c>, <c>boolean</c>, <c>array</c>, <c>object</c>, <c>validationResult</c>, <c>any</c> or <c>void</c>.</summary>
+    /// <summary>
+    /// <c>string</c>, <c>number</c>, <c>boolean</c>, <c>array</c>, <c>object</c>, <c>validationResult</c>, <c>any</c> or <c>void</c>.
+    /// </summary>
     public string ReturnType { get; init; } = "any";
 
+    /// <summary>
+    /// Gets who may call the function: the renderer, the agent, or both.
+    /// </summary>
     public AllowedCallers AllowedCallers { get; init; } = AllowedCallers.RendererOnly;
 
-    /// <summary>When true the function only runs from a user gesture (an action), never from a binding or check.</summary>
+    /// <summary>
+    /// When true the function only runs from a user gesture (an action), never from a binding or check.
+    /// </summary>
     public bool RequiresUserActivation { get; init; }
 
-    /// <summary>The JSON Schema of the function's <c>args</c> object, when declared.</summary>
+    /// <summary>
+    /// The JSON Schema of the function's <c>args</c> object, when declared.
+    /// </summary>
     public JsonObject? ArgsSchema { get; init; }
 
+    /// <summary>
+    /// Gets the catalog's description of the function, or null.
+    /// </summary>
     public string? Description { get; init; }
 
     /// <summary>
@@ -49,8 +79,14 @@ public sealed class FunctionDefinition
     /// </summary>
     public A2UIFunction? Implementation { get; init; }
 
+    /// <summary>
+    /// Gets whether the renderer runs the function itself; when false, calls are routed to the agent with <c>callAgentFunction</c>.
+    /// </summary>
     public bool IsLocal => Implementation is not null;
 
+    /// <summary>
+    /// Returns a copy of this definition that runs <paramref name="implementation"/> locally.
+    /// </summary>
     public FunctionDefinition WithImplementation(A2UIFunction implementation) => new(Name)
     {
         ReturnType = ReturnType,
@@ -61,6 +97,10 @@ public sealed class FunctionDefinition
         Implementation = implementation,
     };
 
+    /// <summary>
+    /// Parses a catalog's <c>allowedCallers</c> value; a missing value means renderer only.
+    /// </summary>
+    /// <exception cref="A2UICatalogException">The value is not one the spec defines.</exception>
     internal static AllowedCallers ParseCallers(string? value) => value switch
     {
         null or "rendererOnly" => AllowedCallers.RendererOnly,

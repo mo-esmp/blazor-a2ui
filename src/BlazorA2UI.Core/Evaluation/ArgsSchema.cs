@@ -10,6 +10,9 @@ namespace BlazorA2UI.Evaluation;
 /// </summary>
 internal static class ArgsSchema
 {
+    /// <summary>
+    /// Fills missing arguments from their schema defaults (nested defaults too) and coerces <c>DynamicBoolean</c> values, changing <paramref name="args"/> in place.
+    /// </summary>
     public static void ApplyDefaultsAndCoerce(JsonObject schema, JsonObject args)
     {
         if (schema["properties"] is not JsonObject props)
@@ -85,6 +88,9 @@ internal static class ArgsSchema
         return null;
     }
 
+    /// <summary>
+    /// Whether a literal argument contains a binding or call anywhere, so it can only be checked once it resolves.
+    /// </summary>
     private static bool IsDynamic(JsonNode? node) => node switch
     {
         JsonObject o => o.ContainsKey("@path") || o.ContainsKey("@call") || o.Any(p => IsDynamic(p.Value)),
@@ -92,7 +98,9 @@ internal static class ArgsSchema
         _ => false,
     };
 
-    /// <summary>Returns a description of the first problem, or null when the arguments are valid.</summary>
+    /// <summary>
+    /// Returns a description of the first problem, or null when the arguments are valid.
+    /// </summary>
     public static string? Validate(JsonObject schema, JsonObject args)
     {
         JsonObject? props = schema["properties"] as JsonObject;
@@ -100,7 +108,11 @@ internal static class ArgsSchema
         {
             foreach (JsonNode? r in required)
             {
-                string key = r!.GetValue<string>();
+                if (A2UIValues.AsString(r) is not { } key)
+                {
+                    continue;
+                }
+
                 if (!args.ContainsKey(key))
                 {
                     return $"missing required argument '{key}'";
@@ -131,6 +143,14 @@ internal static class ArgsSchema
         return null;
     }
 
+    /// <summary>
+    /// Checks one argument value against its property schema.
+    /// </summary>
+    /// <param name="prop">The argument's schema.</param>
+    /// <param name="value">The argument value.</param>
+    /// <param name="key">The argument name, for the message.</param>
+    /// <param name="literal">Whether the value is the literal from the message, before evaluation.</param>
+    /// <returns>The problem, or null when the value fits.</returns>
     private static string? CheckValue(JsonObject prop, JsonNode? value, string key, bool literal = false)
     {
         if (value is null)
@@ -180,6 +200,9 @@ internal static class ArgsSchema
         return null;
     }
 
+    /// <summary>
+    /// Whether a schema is a <c>$ref</c> to the common type named <paramref name="typeName"/>.
+    /// </summary>
     private static bool IsRef(JsonObject schema, string typeName) =>
         A2UIValues.AsString(schema["$ref"]) is { } r && r.EndsWith("/" + typeName, StringComparison.Ordinal);
 }

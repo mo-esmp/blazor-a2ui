@@ -4,9 +4,14 @@ using System.Text.Json.Nodes;
 
 namespace BlazorA2UI.Evaluation;
 
-/// <summary>Coercion rules between JSON values, as defined by A2UI v1.0.</summary>
+/// <summary>
+/// Coercion rules between JSON values, as defined by A2UI v1.0.
+/// </summary>
 public static class A2UIValues
 {
+    /// <summary>
+    /// Serializer options for the compact JSON used when a value is turned into text.
+    /// </summary>
     private static readonly JsonSerializerOptions s_compactJson = new() { WriteIndented = false };
 
     /// <summary>
@@ -20,6 +25,7 @@ public static class A2UIValues
             case null:
                 return false;
             case JsonObject obj:
+                // IsValidationResult guarantees "valid" holds a boolean.
                 return IsValidationResult(obj) && obj["valid"]!.GetValue<bool>();
             case JsonArray:
                 return false;
@@ -45,11 +51,15 @@ public static class A2UIValues
         }
     }
 
-    /// <summary>True when <paramref name="obj"/> has a boolean <c>valid</c> property.</summary>
+    /// <summary>
+    /// True when <paramref name="obj"/> has a boolean <c>valid</c> property.
+    /// </summary>
     public static bool IsValidationResult(JsonObject obj) =>
         obj["valid"] is JsonValue v && v.GetValueKind() is JsonValueKind.True or JsonValueKind.False;
 
-    /// <summary>String conversion for interpolation and display: null is empty, objects and arrays are JSON.</summary>
+    /// <summary>
+    /// String conversion for interpolation and display: null is empty, objects and arrays are JSON.
+    /// </summary>
     public static string ToDisplayString(JsonNode? value)
     {
         switch (value)
@@ -77,7 +87,9 @@ public static class A2UIValues
         return value.ToJsonString(s_compactJson);
     }
 
-    /// <summary>Formats a number the way JavaScript's <c>String(n)</c> does for common values.</summary>
+    /// <summary>
+    /// Formats a number the way JavaScript's <c>String(n)</c> does for common values.
+    /// </summary>
     public static string FormatNumber(double n)
     {
         if (double.IsNaN(n))
@@ -98,7 +110,9 @@ public static class A2UIValues
         return n.ToString("R", CultureInfo.InvariantCulture);
     }
 
-    /// <summary>Reads a number, accepting numeric strings. Returns null when the value is not numeric.</summary>
+    /// <summary>
+    /// Reads a number, accepting numeric strings. Returns null when the value is not numeric.
+    /// </summary>
     public static double? ToDouble(JsonNode? value)
     {
         if (value is not JsonValue v)
@@ -140,11 +154,15 @@ public static class A2UIValues
         }
     }
 
-    /// <summary>Reads a string value, or null when the value is not a JSON string.</summary>
+    /// <summary>
+    /// Reads a string value, or null when the value is not a JSON string.
+    /// </summary>
     public static string? AsString(JsonNode? value) =>
         value is JsonValue v && v.GetValueKind() == JsonValueKind.String ? v.GetValue<string>() : null;
 
-    /// <summary>Builds a <c>ValidationResult</c> object.</summary>
+    /// <summary>
+    /// Builds a <c>ValidationResult</c> object.
+    /// </summary>
     public static JsonObject ValidationResult(bool valid, string? message = null, string? code = null, string? severity = null)
     {
         JsonObject result = new() { ["valid"] = valid };
@@ -176,6 +194,7 @@ public static class A2UIValues
         if (value is JsonObject obj && IsValidationResult(obj))
         {
             JsonObject result = (JsonObject)obj.DeepClone();
+            // IsValidationResult guarantees "valid" holds a boolean.
             if (!obj["valid"]!.GetValue<bool>())
             {
                 if (ruleMessage is not null)

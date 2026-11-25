@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using BlazorA2UI.Catalogs;
 using BlazorA2UI.Data;
@@ -15,11 +16,26 @@ namespace BlazorA2UI.Processing;
 /// </summary>
 public sealed class Surface
 {
+    /// <summary>
+    /// The surface's components, by id.
+    /// </summary>
     private readonly Dictionary<string, ComponentInstance> _components = new(StringComparer.Ordinal);
+    /// <summary>
+    /// The errors already reported for this surface's components, so a re-render does not report them again.
+    /// </summary>
     private readonly HashSet<string> _reportedErrors = new(StringComparer.Ordinal);
+    /// <summary>
+    /// How many <see cref="BatchChanges"/> scopes are open.
+    /// </summary>
     private int _changeSuspension;
+    /// <summary>
+    /// Whether a change happened while changes were batched.
+    /// </summary>
     private bool _changePending;
 
+    /// <summary>
+    /// Creates a surface; <see cref="MessageProcessor"/> builds these for <c>createSurface</c>.
+    /// </summary>
     internal Surface(MessageProcessor processor, string surfaceId, string? catalogId, bool sendDataModel, JsonObject? metadata)
     {
         Processor = processor;
@@ -33,48 +49,88 @@ public sealed class Surface
         AgentCalls = new AgentCallManager(this);
     }
 
+    /// <summary>
+    /// Gets the processor that owns the surface.
+    /// </summary>
     public MessageProcessor Processor { get; }
 
-    /// <summary>The catalogs this surface can use: those registered when it was created.</summary>
+    /// <summary>
+    /// The catalogs this surface can use: those registered when it was created.
+    /// </summary>
     public IReadOnlySet<string> CatalogIds { get; }
 
-    /// <summary>Looks up a catalog this surface can use.</summary>
-    internal bool TryGetCatalog(string catalogId, out Catalogs.Catalog catalog)
+    /// <summary>
+    /// Looks up a catalog this surface can use.
+    /// </summary>
+    internal bool TryGetCatalog(string catalogId, [MaybeNullWhen(false)] out Catalogs.Catalog catalog)
     {
-        catalog = null!;
+        catalog = null;
         return CatalogIds.Contains(catalogId) && Processor.Catalogs.TryGet(catalogId, out catalog);
     }
 
+    /// <summary>
+    /// Gets the surface id.
+    /// </summary>
     public string SurfaceId { get; }
 
-    /// <summary>The surface's default catalog id, from <c>createSurface</c>.</summary>
+    /// <summary>
+    /// The surface's default catalog id, from <c>createSurface</c>.
+    /// </summary>
     public string? CatalogId { get; }
 
+    /// <summary>
+    /// Gets whether the agent asked for the data model to be sent with every event (<c>sendDataModel</c>).
+    /// </summary>
     public bool SendDataModel { get; }
 
-    /// <summary>Surface metadata (<c>metadata.extensions</c>) from <c>createSurface</c>.</summary>
+    /// <summary>
+    /// Surface metadata (<c>metadata.extensions</c>) from <c>createSurface</c>.
+    /// </summary>
     public JsonObject? Metadata { get; }
 
+    /// <summary>
+    /// Gets the surface's data model.
+    /// </summary>
     public DataModel DataModel { get; }
 
+    /// <summary>
+    /// Gets the surface's components, by id.
+    /// </summary>
     public IReadOnlyDictionary<string, ComponentInstance> Components => _components;
 
-    /// <summary>The root component, once the agent has sent one with id <c>root</c>.</summary>
+    /// <summary>
+    /// The root component, once the agent has sent one with id <c>root</c>.
+    /// </summary>
     public ComponentInstance? Root => _components.GetValueOrDefault("root");
 
+    /// <summary>
+    /// Gets whether the agent deleted the surface with <c>deleteSurface</c>.
+    /// </summary>
     public bool IsDeleted { get; internal set; }
 
+    /// <summary>
+    /// Gets the calls this surface has routed to the agent.
+    /// </summary>
     internal AgentCallManager AgentCalls { get; }
 
-    /// <summary>Routes calls without a local implementation to the agent.</summary>
+    /// <summary>
+    /// Routes calls without a local implementation to the agent.
+    /// </summary>
     public IAgentFunctionRouter AgentRouter => AgentCalls;
 
-    /// <summary>Raised when components or data change, or an asynchronous value settles.</summary>
+    /// <summary>
+    /// Raised when components or data change, or an asynchronous value settles.
+    /// </summary>
     public event Action? Changed;
 
-    /// <summary>The root evaluation context of this surface.</summary>
+    /// <summary>
+    /// The root evaluation context of this surface.
+    /// </summary>
     public EvaluationContext RootContext => EvaluationContext.ForSurface(this);
 
+    /// <summary>
+    /// Adds or replaces components, clears the reported errors, and raises <see cref="Changed"/>.
+    /// </summary>
     internal void ReplaceComponents(IEnumerable<ComponentInstance> components)
     {
         foreach (ComponentInstance component in components)
@@ -86,9 +142,14 @@ public sealed class Surface
         NotifyChanged();
     }
 
+    /// <summary>
+    /// Returns a copy of the component map, for validating an update before it is applied.
+    /// </summary>
     internal Dictionary<string, ComponentInstance> SnapshotComponents() => new(_components, StringComparer.Ordinal);
 
-    /// <summary>Raises <see cref="Changed"/> (coalesced while updates are batched).</summary>
+    /// <summary>
+    /// Raises <see cref="Changed"/> (coalesced while updates are batched).
+    /// </summary>
     public void NotifyChanged()
     {
         if (_changeSuspension > 0)
@@ -100,16 +161,29 @@ public sealed class Surface
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// Holds back <see cref="Changed"/> until the returned scope is disposed, then raises it once if anything changed.
+    /// </summary>
     internal IDisposable BatchChanges()
     {
         _changeSuspension++;
         return new Resume(this);
     }
 
+    /// <summary>
+    /// Ends a <see cref="BatchChanges"/> scope.
+    /// </summary>
+    /// <param name="surface">The surface whose changes are batched.</param>
     private sealed class Resume(Surface surface) : IDisposable
     {
+        /// <summary>
+        /// Whether this scope has already ended.
+        /// </summary>
         private bool _disposed;
 
+        /// <summary>
+        /// Ends the scope; disposing twice does nothing.
+        /// </summary>
         public void Dispose()
         {
             if (_disposed)
@@ -152,6 +226,9 @@ public sealed class Surface
         JsonNode? value, EvaluationContext context, out bool pending, out IReadOnlyList<A2UIException> errors, EvaluationMode mode = EvaluationMode.Binding) =>
         Evaluate(value, context, out pending, out errors, mode, requestedAgentCalls: null);
 
+    /// <summary>
+    /// Evaluates a value with the given set of already-requested agent calls; <see cref="A2UIBinding"/> passes its own set.
+    /// </summary>
     internal JsonNode? Evaluate(
         JsonNode? value,
         EvaluationContext context,
@@ -181,15 +258,21 @@ public sealed class Surface
         }
     }
 
-    /// <summary>Evaluates a property and returns it as display text (null and missing values are empty).</summary>
+    /// <summary>
+    /// Evaluates a property and returns it as display text (null and missing values are empty).
+    /// </summary>
     public string EvaluateString(JsonNode? value, EvaluationContext context) =>
         A2UIValues.ToDisplayString(Evaluate(value, context, out _));
 
-    /// <summary>Evaluates a property as a <c>DynamicBoolean</c>.</summary>
+    /// <summary>
+    /// Evaluates a property as a <c>DynamicBoolean</c>.
+    /// </summary>
     public bool EvaluateBoolean(JsonNode? value, EvaluationContext context) =>
         A2UIValues.ToBoolean(Evaluate(value, context, out _));
 
-    /// <summary>Evaluates a property as a number, or null when it is not numeric.</summary>
+    /// <summary>
+    /// Evaluates a property as a number, or null when it is not numeric.
+    /// </summary>
     public double? EvaluateNumber(JsonNode? value, EvaluationContext context) =>
         A2UIValues.ToDouble(Evaluate(value, context, out _));
 
@@ -318,10 +401,13 @@ public sealed class Surface
         return result;
     }
 
-    /// <summary>Looks up a child, applying the catalog's composition rules.</summary>
-    public bool TryGetChild(ComponentInstance parent, string childId, out ComponentInstance child)
+    /// <summary>
+    /// Looks up a child, applying the catalog's composition rules.
+    /// </summary>
+    /// <returns>False when no component has the id, or its catalog does not allow it under <paramref name="parent"/>.</returns>
+    public bool TryGetChild(ComponentInstance parent, string childId, [MaybeNullWhen(false)] out ComponentInstance child)
     {
-        if (!_components.TryGetValue(childId, out child!))
+        if (!_components.TryGetValue(childId, out child))
         {
             return false;
         }
@@ -336,6 +422,9 @@ public sealed class Surface
     public Task DispatchActionAsync(ComponentInstance component, EvaluationContext context, CancellationToken cancellationToken = default) =>
         Processor.DispatchActionAsync(this, component, component.Properties["action"], context, cancellationToken);
 
+    /// <summary>
+    /// Reports an error unless the same code and message were already reported for this surface. At most 256 distinct errors are reported.
+    /// </summary>
     internal void ReportOnce(A2UIException ex)
     {
         string key = $"{ex.Code}|{ex.Message}";
@@ -345,31 +434,56 @@ public sealed class Surface
         }
     }
 
+    /// <summary>
+    /// Returns a copy of the data model's root object, or an empty object.
+    /// </summary>
     internal JsonObject DataModelSnapshot() => DataModel.Root?.DeepClone() as JsonObject ?? new JsonObject();
 }
 
-/// <summary>The result of a component's <c>@checks</c>.</summary>
+/// <summary>
+/// The result of a component's <c>@checks</c>.
+/// </summary>
 /// <param name="Failures">Failing <c>ValidationResult</c>s in declaration order, including warnings and info.</param>
 public sealed record CheckOutcome(IReadOnlyList<JsonObject> Failures)
 {
+    /// <summary>
+    /// Gets the outcome with no failures.
+    /// </summary>
     public static CheckOutcome Valid { get; } = new([]);
 
-    /// <summary>Failures that block (severity <c>error</c>).</summary>
+    /// <summary>
+    /// Failures that block (severity <c>error</c>).
+    /// </summary>
     public IEnumerable<JsonObject> Errors => Failures.Where(f => A2UIValues.AsString(f["severity"]) is null or "error");
 
-    /// <summary>True when no failure has severity <c>error</c>.</summary>
+    /// <summary>
+    /// True when no failure has severity <c>error</c>.
+    /// </summary>
     public bool IsValid => !Errors.Any();
 
-    /// <summary>Messages of the blocking failures.</summary>
+    /// <summary>
+    /// Messages of the blocking failures.
+    /// </summary>
     public IEnumerable<string> ErrorMessages => Errors.Select(f => A2UIValues.AsString(f["message"]) ?? "Invalid value.");
 }
 
-/// <summary>Catalog composition rules (<c>allowedParents</c> / <c>allowedChildren</c>).</summary>
+/// <summary>
+/// Catalog composition rules (<c>allowedParents</c> / <c>allowedChildren</c>).
+/// </summary>
 public static class Composition
 {
-    /// <summary>The reserved type name of the surface container.</summary>
+    /// <summary>
+    /// The reserved type name of the surface container.
+    /// </summary>
     public const string SurfaceType = "Surface";
 
+    /// <summary>
+    /// Whether <paramref name="child"/> may be placed under <paramref name="parent"/> by both components' composition rules.
+    /// </summary>
+    /// <param name="parent">The parent's definition, or null for the surface itself.</param>
+    /// <param name="parentType">The parent's type name.</param>
+    /// <param name="child">The child's definition.</param>
+    /// <param name="childType">The child's type name.</param>
     public static bool IsAllowed(ComponentDefinition? parent, string parentType, ComponentDefinition child, string childType)
     {
         if (parent?.AllowedChildren is { } allowedChildren && !allowedChildren.Contains(childType, StringComparer.Ordinal))

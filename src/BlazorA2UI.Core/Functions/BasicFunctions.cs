@@ -9,10 +9,14 @@ using BlazorA2UI.Expressions;
 
 namespace BlazorA2UI.Functions;
 
-/// <summary>Renderer-side implementations of the basic catalog's functions.</summary>
+/// <summary>
+/// Renderer-side implementations of the basic catalog's functions.
+/// </summary>
 public static partial class BasicFunctions
 {
-    /// <summary>Returns every basic catalog function implementation, keyed by name.</summary>
+    /// <summary>
+    /// Returns every basic catalog function implementation, keyed by name.
+    /// </summary>
     public static IReadOnlyDictionary<string, A2UIFunction> Create(CultureInfo? culture = null)
     {
         CultureInfo c = ResolveCulture(culture);
@@ -35,17 +39,29 @@ public static partial class BasicFunctions
         };
     }
 
+    /// <summary>
+    /// Returns the culture to format with: the given one, else the current culture, with the invariant culture replaced by en-US.
+    /// </summary>
     private static CultureInfo ResolveCulture(CultureInfo? culture)
     {
         culture ??= CultureInfo.CurrentCulture;
         return string.IsNullOrEmpty(culture.Name) ? CultureInfo.GetCultureInfo("en-US") : culture;
     }
 
+    /// <summary>
+    /// Wraps a synchronous function as an <see cref="A2UIFunction"/>.
+    /// </summary>
     private static A2UIFunction Sync(Func<FunctionInvocation, JsonNode?> f) => i => ValueTask.FromResult(f(i));
 
+    /// <summary>
+    /// Builds a check result; the message, code and severity are kept only when the check fails.
+    /// </summary>
     private static JsonNode Valid(bool valid, string? message = null, string? code = null, string? severity = null) =>
         valid ? A2UIValues.ValidationResult(true) : A2UIValues.ValidationResult(false, message, code, severity);
 
+    /// <summary>
+    /// The <c>required</c> check: fails for null, an empty string and an empty list.
+    /// </summary>
     private static JsonNode Required(FunctionInvocation i)
     {
         JsonNode? value = i.Arg("value");
@@ -60,6 +76,10 @@ public static partial class BasicFunctions
         return Valid(present, "This field is required.");
     }
 
+    /// <summary>
+    /// The <c>regex</c> check: matches the value with the A2UI regex dialect.
+    /// </summary>
+    /// <exception cref="A2UIExpressionException">The pattern is not valid or not safe.</exception>
     private static JsonNode RegexMatch(FunctionInvocation i)
     {
         string pattern = A2UIValues.AsString(i.Arg("pattern"))
@@ -74,6 +94,9 @@ public static partial class BasicFunctions
         return Valid(A2UIRegex.IsMatch(pattern, value), "Value does not match required pattern.");
     }
 
+    /// <summary>
+    /// The <c>length</c> check: compares a string's length in code points, or a list's item count, with <c>min</c> and <c>max</c>.
+    /// </summary>
     private static JsonNode Length(FunctionInvocation i)
     {
         JsonNode? value = i.Arg("value");
@@ -93,6 +116,9 @@ public static partial class BasicFunctions
         return max is { } hi && length > hi ? Valid(false, $"Maximum length is {A2UIValues.FormatNumber(hi)}.") : Valid(true);
     }
 
+    /// <summary>
+    /// The <c>numeric</c> check: the value must parse as a number within <c>min</c> and <c>max</c>.
+    /// </summary>
     private static JsonNode Numeric(FunctionInvocation i)
     {
         if (A2UIValues.ToDouble(i.Arg("value")) is not { } n || double.IsNaN(n))
@@ -113,6 +139,9 @@ public static partial class BasicFunctions
     [GeneratedRegex(@"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 250)]
     private static partial Regex EmailPattern();
 
+    /// <summary>
+    /// The <c>email</c> check.
+    /// </summary>
     private static JsonNode Email(FunctionInvocation i)
     {
         string? value = A2UIValues.AsString(i.Arg("value"));
@@ -120,6 +149,10 @@ public static partial class BasicFunctions
         return Valid(valid, "Please enter a valid email address (e.g. user@example.com).", "INVALID_EMAIL", "error");
     }
 
+    /// <summary>
+    /// The <c>formatString</c> function: evaluates a template's interpolations and joins the parts. A part that fails is reported and renders empty.
+    /// </summary>
+    /// <returns>The text, or null while a part is still pending.</returns>
     private static async ValueTask<JsonNode?> FormatStringAsync(FunctionInvocation i)
     {
         string template = A2UIValues.ToDisplayString(i.Arg("value"));
@@ -160,6 +193,9 @@ public static partial class BasicFunctions
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Returns a copy of the culture's number format, without group separators when <paramref name="grouping"/> is false.
+    /// </summary>
     private static NumberFormatInfo NumberFormat(CultureInfo culture, bool grouping)
     {
         NumberFormatInfo format = (NumberFormatInfo)culture.NumberFormat.Clone();
@@ -172,8 +208,15 @@ public static partial class BasicFunctions
         return format;
     }
 
+    /// <summary>
+    /// Reads the <c>grouping</c> argument; true when it is missing.
+    /// </summary>
     private static bool Grouping(FunctionInvocation i) => i.Args["grouping"] is not { } g || A2UIValues.ToBoolean(g);
 
+    /// <summary>
+    /// The <c>formatNumber</c> function: formats with the requested fraction digits and grouping.
+    /// </summary>
+    /// <returns>The text, or an empty string when the value is not a number.</returns>
     private static JsonNode? FormatNumber(FunctionInvocation i, CultureInfo culture)
     {
         if (A2UIValues.ToDouble(i.Arg("value")) is not { } n)
@@ -203,6 +246,10 @@ public static partial class BasicFunctions
         return text;
     }
 
+    /// <summary>
+    /// The <c>formatCurrency</c> function: formats an amount with an ISO 4217 code's symbol and digits.
+    /// </summary>
+    /// <returns>The text, or an empty string when the amount is not a number.</returns>
     private static JsonNode? FormatCurrency(FunctionInvocation i, CultureInfo culture)
     {
         if (A2UIValues.ToDouble(i.Arg("value")) is not { } n)
@@ -218,8 +265,14 @@ public static partial class BasicFunctions
         return Math.Round(n, digits, MidpointRounding.AwayFromZero).ToString("C" + digits, format);
     }
 
+    /// <summary>
+    /// Currency symbols and fraction digits by ISO code and culture, found once by scanning cultures.
+    /// </summary>
     private static readonly Dictionary<string, (string Symbol, int Digits)> s_currencyCache = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Finds the symbol and fraction digits for a currency code. An unknown code is shown as the code itself, with two digits.
+    /// </summary>
     private static (string Symbol, int Digits) CurrencyInfo(string code, CultureInfo culture)
     {
         if (code.Length != 3)
@@ -270,6 +323,10 @@ public static partial class BasicFunctions
         }
     }
 
+    /// <summary>
+    /// The <c>formatDate</c> function: formats a date with a TR35 pattern.
+    /// </summary>
+    /// <returns>The text, or an empty string when the value is not a date.</returns>
     private static JsonNode? FormatDate(FunctionInvocation i, CultureInfo culture)
     {
         string format = A2UIValues.AsString(i.Arg("format")) ?? "yyyy-MM-dd";
@@ -286,6 +343,9 @@ public static partial class BasicFunctions
         return Tr35DateFormatter.Format(date, format, culture);
     }
 
+    /// <summary>
+    /// The ISO 8601 forms a date string may take.
+    /// </summary>
     private static readonly string[] s_dateFormats =
     [
         "yyyy-MM-dd", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF",
@@ -293,6 +353,10 @@ public static partial class BasicFunctions
         "yyyy-MM-dd HH:mm", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm:ssK", "HH:mm", "HH:mm:ss",
     ];
 
+    /// <summary>
+    /// Reads a date from epoch milliseconds or an ISO 8601 string.
+    /// </summary>
+    /// <returns>False when the value is neither, or the time is outside the range a <see cref="DateTimeOffset"/> can hold.</returns>
     private static bool TryReadDate(JsonNode? value, out DateTimeOffset date)
     {
         date = default;
@@ -321,6 +385,9 @@ public static partial class BasicFunctions
             out date);
     }
 
+    /// <summary>
+    /// The <c>pluralize</c> function: an exact <c>zero</c>, <c>one</c> or <c>two</c> text wins for 0, 1 and 2; otherwise it picks the text for the count's CLDR plural category, then <c>other</c>, then an empty string.
+    /// </summary>
     private static JsonNode? Pluralize(FunctionInvocation i, CultureInfo culture)
     {
         double n = A2UIValues.ToDouble(i.Arg("value")) ?? 0;
@@ -336,6 +403,10 @@ public static partial class BasicFunctions
         return Pick(PluralRules.Category(n, culture)) ?? Pick("other") ?? string.Empty;
     }
 
+    /// <summary>
+    /// The <c>openUrl</c> function: opens a URL that <see cref="UrlSafety.ValidateNavigationUrl"/> accepts through the host's <see cref="IA2UIUrlLauncher"/>. Without a launcher it does nothing.
+    /// </summary>
+    /// <exception cref="A2UIExpressionException">The URL is empty or not allowed.</exception>
     private static async ValueTask<JsonNode?> OpenUrlAsync(FunctionInvocation i)
     {
         string url = UrlSafety.ValidateNavigationUrl(A2UIValues.AsString(i.Arg("url")));
@@ -347,6 +418,12 @@ public static partial class BasicFunctions
         return null;
     }
 
+    /// <summary>
+    /// The <c>and</c> and <c>or</c> functions.
+    /// </summary>
+    /// <param name="i">The invocation.</param>
+    /// <param name="all">True for <c>and</c>, false for <c>or</c>.</param>
+    /// <exception cref="A2UIExpressionException">Fewer than two values were given.</exception>
     private static JsonNode Logical(FunctionInvocation i, bool all)
     {
         if (i.Arg("values") is not JsonArray values || values.Count < 2)

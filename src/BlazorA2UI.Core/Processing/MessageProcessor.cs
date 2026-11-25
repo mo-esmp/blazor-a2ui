@@ -19,14 +19,35 @@ namespace BlazorA2UI.Processing;
 /// </summary>
 public sealed class MessageProcessor
 {
+    /// <summary>
+    /// The message kinds of protocol v1.0; an envelope must hold exactly one of them.
+    /// </summary>
     private static readonly string[] s_messageKinds =
         ["createSurface", "updateComponents", "updateDataModel", "deleteSurface", "callRendererFunction", "agentFunctionResponse"];
 
+    /// <summary>
+    /// The live surfaces, by id.
+    /// </summary>
     private readonly ConcurrentDictionary<string, Surface> _surfaces = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _usedSurfaceIds = new(StringComparer.Ordinal);
+    /// <summary>
+    /// The ids of surfaces that exist or are being created, so two <c>createSurface</c> messages cannot claim the same id.
+    /// </summary>
+    private readonly HashSet<string> _reservedSurfaceIds = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Outbound sends that have not finished, so callers can wait for them.
+    /// </summary>
     private readonly List<Task> _inFlight = [];
+    /// <summary>
+    /// The validation rules of the message being processed, or null for a streaming renderer.
+    /// </summary>
     private A2UIValidationConfig? _activeValidation;
 
+    /// <summary>
+    /// Creates a processor.
+    /// </summary>
+    /// <param name="catalogs">The catalogs the renderer supports.</param>
+    /// <param name="options">Limits and behavior; null uses the defaults.</param>
+    /// <exception cref="A2UICatalogException">Two catalogs share an id, or a catalog targets another protocol version.</exception>
     public MessageProcessor(IEnumerable<Catalog> catalogs, A2UIProcessorOptions? options = null)
     {
         Options = options ?? new A2UIProcessorOptions();
@@ -44,7 +65,9 @@ public sealed class MessageProcessor
         _activeValidation = Options.Validation;
     }
 
-    /// <summary>Registers another catalog. Its id must not already be registered.</summary>
+    /// <summary>
+    /// Registers another catalog. Its id must not already be registered.
+    /// </summary>
     public void AddCatalog(Catalog catalog)
     {
         ArgumentNullException.ThrowIfNull(catalog);
@@ -57,12 +80,24 @@ public sealed class MessageProcessor
         Catalogs.Add(catalog);
     }
 
+    /// <summary>
+    /// Gets the processor's limits and behavior.
+    /// </summary>
     public A2UIProcessorOptions Options { get; }
 
+    /// <summary>
+    /// Gets the catalogs the renderer supports. A surface sees only the ones registered when it was created.
+    /// </summary>
     public CatalogRegistry Catalogs { get; }
 
+    /// <summary>
+    /// Gets the evaluator for bindings and function calls.
+    /// </summary>
     public A2UIEvaluator Evaluator { get; }
 
+    /// <summary>
+    /// Gets the live surfaces, by id.
+    /// </summary>
     public IReadOnlyDictionary<string, Surface> Surfaces => _surfaces;
 
     /// <summary>
@@ -71,16 +106,29 @@ public sealed class MessageProcessor
     /// </summary>
     public Func<A2UIOutboundMessage, ValueTask>? Outbound { get; set; }
 
+    /// <summary>
+    /// Gets whether a transport to the agent is set.
+    /// </summary>
     internal bool HasOutbound => Outbound is not null;
 
+    /// <summary>
+    /// Raised after a surface is created, once its initial components and data are applied.
+    /// </summary>
     public event Action<Surface>? SurfaceCreated;
 
+    /// <summary>
+    /// Raised after the agent deletes a surface.
+    /// </summary>
     public event Action<Surface>? SurfaceDeleted;
 
-    /// <summary>Raised for every error the renderer reports.</summary>
+    /// <summary>
+    /// Raised for every error the renderer reports.
+    /// </summary>
     public event Action<A2UIErrorReport>? ErrorReported;
 
-    /// <summary>The <c>a2uiRendererCapabilities</c> object to advertise in transport metadata.</summary>
+    /// <summary>
+    /// The <c>a2uiRendererCapabilities</c> object to advertise in transport metadata.
+    /// </summary>
     public JsonObject GetRendererCapabilities() => new()
     {
         [A2UIProtocol.Version] = new JsonObject
@@ -89,7 +137,9 @@ public sealed class MessageProcessor
         },
     };
 
-    /// <summary>The <c>a2uiRendererDataModel</c> metadata for surfaces that asked for <c>sendDataModel</c>, or null.</summary>
+    /// <summary>
+    /// The <c>a2uiRendererDataModel</c> metadata for surfaces that asked for <c>sendDataModel</c>, or null.
+    /// </summary>
     public JsonObject? GetRendererDataModel()
     {
         JsonObject surfaces = new();
@@ -101,7 +151,9 @@ public sealed class MessageProcessor
         return surfaces.Count == 0 ? null : new JsonObject { ["version"] = A2UIProtocol.Version, ["surfaces"] = surfaces };
     }
 
-    /// <summary>Processes one line of a JSONL stream. Blank lines are ignored.</summary>
+    /// <summary>
+    /// Processes one line of a JSONL stream. Blank lines are ignored.
+    /// </summary>
     public void ProcessLine(string line)
     {
         if (string.IsNullOrWhiteSpace(line))
@@ -139,7 +191,9 @@ public sealed class MessageProcessor
         }
     }
 
-    /// <summary>Like <see cref="Process(JsonNode)"/>, but throws the first envelope-level error.</summary>
+    /// <summary>
+    /// Like <see cref="Process(JsonNode)"/>, but throws the first envelope-level error.
+    /// </summary>
     public void ProcessOrThrow(JsonNode? message) => ProcessOrThrow(message, null);
 
     /// <summary>
@@ -160,6 +214,10 @@ public sealed class MessageProcessor
         }
     }
 
+    /// <summary>
+    /// Processes a message, a JSON array of messages, or a <c>{"messages": [...]}</c> wrapper.
+    /// </summary>
+    /// <exception cref="A2UIException">The message is invalid; messages before it in a batch stay applied.</exception>
     private void ProcessCore(JsonNode? message)
     {
         switch (message)
@@ -183,7 +241,9 @@ public sealed class MessageProcessor
         }
     }
 
-    /// <summary>Largest JSON nesting accepted in one message.</summary>
+    /// <summary>
+    /// Largest JSON nesting accepted in one message.
+    /// </summary>
     internal const int MaxMessageDepth = 50;
 
     /// <summary>
@@ -207,7 +267,7 @@ public sealed class MessageProcessor
 
                 break;
             case JsonObject obj:
-                foreach (string? key in new[] { "path", "@path" })
+                foreach (string key in new[] { "path", "@path" })
                 {
                     if (obj[key] is JsonValue v && v.TryGetValue<string>(out string? path) && !IsValidPathSyntax(path))
                     {
@@ -224,7 +284,9 @@ public sealed class MessageProcessor
         }
     }
 
-    /// <summary>A JSON Pointer or relative path whose <c>~</c> characters are all <c>~0</c> or <c>~1</c> escapes.</summary>
+    /// <summary>
+    /// A JSON Pointer or relative path whose <c>~</c> characters are all <c>~0</c> or <c>~1</c> escapes.
+    /// </summary>
     private static bool IsValidPathSyntax(string path)
     {
         for (int i = 0; i < path.Length; i++)
@@ -238,7 +300,9 @@ public sealed class MessageProcessor
         return true;
     }
 
-    /// <summary>Completes when every in-flight <c>callRendererFunction</c> has been answered.</summary>
+    /// <summary>
+    /// Completes when every in-flight <c>callRendererFunction</c> has been answered.
+    /// </summary>
     public Task WhenIdleAsync()
     {
         Task[] tasks;
@@ -251,6 +315,10 @@ public sealed class MessageProcessor
         return Task.WhenAll(tasks);
     }
 
+    /// <summary>
+    /// Checks an envelope's version and kind and dispatches it.
+    /// </summary>
+    /// <exception cref="A2UIException">The envelope or its body is invalid.</exception>
     private void ProcessEnvelope(JsonObject envelope)
     {
         if (!envelope.TryGetPropertyValue("version", out JsonNode? versionNode))
@@ -310,6 +378,10 @@ public sealed class MessageProcessor
         }
     }
 
+    /// <summary>
+    /// Reads a body's <c>surfaceId</c>.
+    /// </summary>
+    /// <exception cref="A2UIValidationException">The id is missing, not a string, or empty.</exception>
     private static string ReadSurfaceId(JsonObject body)
     {
         if (!body.TryGetPropertyValue("surfaceId", out JsonNode? node) || A2UIValues.AsString(node) is not { } id)
@@ -325,11 +397,19 @@ public sealed class MessageProcessor
         return id;
     }
 
+    /// <summary>
+    /// Returns the live surface with the id.
+    /// </summary>
+    /// <exception cref="A2UIException">No surface has the id (<see cref="A2UIErrorCodes.IntegrityError"/>).</exception>
     private Surface GetLiveSurface(string surfaceId) =>
         _surfaces.TryGetValue(surfaceId, out Surface? surface)
             ? surface
             : throw new A2UIException(A2UIErrorCodes.IntegrityError, $"Surface '{surfaceId}' does not exist.") { SurfaceId = surfaceId };
 
+    /// <summary>
+    /// Handles <c>createSurface</c>. The surface is published only after its data and components applied without error, so a rejected message leaves no surface.
+    /// </summary>
+    /// <exception cref="A2UIException">The message is invalid or the id is taken.</exception>
     private void CreateSurface(JsonObject body)
     {
         string surfaceId = ReadSurfaceId(body);
@@ -364,14 +444,12 @@ public sealed class MessageProcessor
             throw new A2UIValidationException("dataModel must be an object.") { SurfaceId = surfaceId };
         }
 
-        lock (_usedSurfaceIds)
+        lock (_reservedSurfaceIds)
         {
-            if (_surfaces.ContainsKey(surfaceId))
+            if (!_reservedSurfaceIds.Add(surfaceId))
             {
                 throw new A2UIException(A2UIErrorCodes.IntegrityError, $"Surface '{surfaceId}' already exists.") { SurfaceId = surfaceId };
             }
-
-            _usedSurfaceIds.Add(surfaceId);
         }
 
         Surface surface = new(
@@ -400,9 +478,9 @@ public sealed class MessageProcessor
         }
         catch
         {
-            lock (_usedSurfaceIds)
+            lock (_reservedSurfaceIds)
             {
-                _usedSurfaceIds.Remove(surfaceId);
+                _reservedSurfaceIds.Remove(surfaceId);
             }
 
             throw;
@@ -412,6 +490,10 @@ public sealed class MessageProcessor
         SurfaceCreated?.Invoke(surface);
     }
 
+    /// <summary>
+    /// Handles <c>updateComponents</c>.
+    /// </summary>
+    /// <exception cref="A2UIException">The surface does not exist or the message is invalid.</exception>
     private void UpdateComponents(JsonObject body)
     {
         string surfaceId = ReadSurfaceId(body);
@@ -424,6 +506,10 @@ public sealed class MessageProcessor
         ApplyComponents(surface, components);
     }
 
+    /// <summary>
+    /// Parses, validates and applies a list of components. Components that fail to parse are reported one by one; rules over the whole tree throw.
+    /// </summary>
+    /// <exception cref="A2UIException">The list is empty or not an array, or a tree rule (composition, cycles, depth, completeness) fails under validation.</exception>
     private void ApplyComponents(Surface surface, JsonNode components)
     {
         if (components is not JsonArray list || list.Count == 0)
@@ -459,7 +545,7 @@ public sealed class MessageProcessor
 
             try
             {
-                parsed.Add(ComponentParser.Parse(raw, surface, Catalogs, _activeValidation));
+                parsed.Add(ComponentParser.Parse(raw, surface, _activeValidation));
             }
             catch (A2UIException ex)
             {
@@ -625,7 +711,9 @@ public sealed class MessageProcessor
         }
     }
 
-    /// <summary>Formats <c>/slots/1/child</c> as <c>slots[1].child</c>.</summary>
+    /// <summary>
+    /// Formats <c>/slots/1/child</c> as <c>slots[1].child</c>.
+    /// </summary>
     private static string FieldName(string pointer)
     {
         StringBuilder builder = new();
@@ -683,6 +771,9 @@ public sealed class MessageProcessor
         }
     }
 
+    /// <summary>
+    /// Whether a value contains an <c>@index</c> call anywhere, up to the nesting limit.
+    /// </summary>
     private static bool ContainsIndexCall(JsonNode? node, int depth) => depth <= 64 && node switch
     {
         JsonObject o when A2UIValues.AsString(o["@call"]) == "@index" => true,
@@ -761,6 +852,10 @@ public sealed class MessageProcessor
         }
     }
 
+    /// <summary>
+    /// Handles <c>updateDataModel</c>: writes or deletes the value at an absolute path.
+    /// </summary>
+    /// <exception cref="A2UIException">The surface does not exist, or the path or write is invalid; the data model is unchanged.</exception>
     private void UpdateDataModel(JsonObject body)
     {
         string surfaceId = ReadSurfaceId(body);
@@ -794,7 +889,9 @@ public sealed class MessageProcessor
         }
     }
 
-    /// <summary>A null written to a list element keeps the list's length (the element becomes null).</summary>
+    /// <summary>
+    /// A null written to a list element keeps the list's length (the element becomes null).
+    /// </summary>
     private static bool IsListElement(DataModel model, string path)
     {
         IReadOnlyList<string> segments = JsonPointer.Parse(path);
@@ -806,6 +903,9 @@ public sealed class MessageProcessor
         return model.TryGet(JsonPointer.Format(segments.Take(segments.Count - 1)), out JsonNode? parent) && parent is JsonArray;
     }
 
+    /// <summary>
+    /// Handles <c>deleteSurface</c>: removes the surface, cancels its agent calls and detaches its observers. Deleting a missing surface does nothing.
+    /// </summary>
     private void DeleteSurface(JsonObject body)
     {
         string surfaceId = ReadSurfaceId(body);
@@ -814,12 +914,21 @@ public sealed class MessageProcessor
             return;
         }
 
+        lock (_reservedSurfaceIds)
+        {
+            _reservedSurfaceIds.Remove(surfaceId);
+        }
+
         surface.IsDeleted = true;
         surface.AgentCalls.CancelAll("The surface was deleted.");
         surface.DataModel.DisposeObservers();
         SurfaceDeleted?.Invoke(surface);
     }
 
+    /// <summary>
+    /// Handles <c>agentFunctionResponse</c> by settling the matching pending call.
+    /// </summary>
+    /// <exception cref="A2UIException">The response is malformed.</exception>
     private void HandleAgentFunctionResponse(JsonObject body)
     {
         string id = A2UIValues.AsString(body["functionCallId"])
@@ -840,7 +949,9 @@ public sealed class MessageProcessor
         // Unknown, late or duplicate responses are ignored.
     }
 
-    /// <summary>Rejects a malformed <c>callRendererFunction</c> envelope before anything runs.</summary>
+    /// <summary>
+    /// Rejects a malformed <c>callRendererFunction</c> envelope before anything runs.
+    /// </summary>
     private static void ValidateCallRendererFunction(JsonObject body)
     {
         string functionCallId = A2UIValues.AsString(body["functionCallId"]) is { Length: > 0 } id
@@ -871,6 +982,9 @@ public sealed class MessageProcessor
         }
     }
 
+    /// <summary>
+    /// Handles <c>callRendererFunction</c>: runs a renderer function for the agent and sends back the value or the error.
+    /// </summary>
     private async Task HandleCallRendererFunctionAsync(JsonObject body)
     {
         string? functionCallId = A2UIValues.AsString(body["functionCallId"]);
@@ -927,7 +1041,9 @@ public sealed class MessageProcessor
         }
     }
 
-    /// <summary>Runs an action for a component after a user gesture.</summary>
+    /// <summary>
+    /// Runs an action for a component after a user gesture.
+    /// </summary>
     internal async Task DispatchActionAsync(
         Surface surface,
         ComponentInstance component,
@@ -1008,6 +1124,9 @@ public sealed class MessageProcessor
         }
     }
 
+    /// <summary>
+    /// Reports a validation problem, keeping the codes the spec names and mapping the rest to <see cref="A2UIErrorCodes.ValidationFailed"/>.
+    /// </summary>
     internal void ReportValidation(string surfaceId, string path, string message, string code = A2UIErrorCodes.ValidationFailed)
     {
         string wireCode = code is A2UIErrorCodes.UnallowedChild or A2UIErrorCodes.UnallowedParent or A2UIErrorCodes.CatalogError
@@ -1017,7 +1136,9 @@ public sealed class MessageProcessor
         ReportError(new A2UIException(wireCode, message) { SurfaceId = surfaceId, Path = path }, surfaceId);
     }
 
-    /// <summary>Reports an error locally and, when configured, to the agent.</summary>
+    /// <summary>
+    /// Reports an error locally and, when configured, to the agent.
+    /// </summary>
     public void ReportError(A2UIException error, string? surfaceId)
     {
         if (error.Code == A2UIErrorCodes.Cancelled)
@@ -1054,8 +1175,14 @@ public sealed class MessageProcessor
         SendOutbound(new JsonObject { ["version"] = A2UIProtocol.Version, ["error"] = body });
     }
 
+    /// <summary>
+    /// Sends a message to the agent in the background; a failed send is reported through <see cref="ErrorReported"/>.
+    /// </summary>
     internal void SendOutbound(JsonObject message) => Track(SendOutboundAsync(message));
 
+    /// <summary>
+    /// Sends a message to the agent with the renderer's data model attached when surfaces ask for it. Does nothing without a transport.
+    /// </summary>
     private async Task SendOutboundAsync(JsonObject message)
     {
         if (Outbound is not { } outbound)
@@ -1075,6 +1202,9 @@ public sealed class MessageProcessor
         }
     }
 
+    /// <summary>
+    /// Keeps a send that is still running, so it can be awaited later.
+    /// </summary>
     private void Track(Task task)
     {
         if (task.IsCompleted)
@@ -1089,6 +1219,11 @@ public sealed class MessageProcessor
         }
     }
 
+    /// <summary>
+    /// Reads and checks a <c>metadata</c> object: only <c>extensions</c> is allowed, and its keys must be UAX #31 identifiers.
+    /// </summary>
+    /// <returns>The metadata, or null when there is none.</returns>
+    /// <exception cref="A2UIValidationException">The metadata is not an object or has a key that is not allowed.</exception>
     internal static JsonObject? ReadMetadata(JsonNode? node, string surfaceId, string where)
     {
         if (node is null)

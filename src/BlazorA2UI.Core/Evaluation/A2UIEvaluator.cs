@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using BlazorA2UI.Catalogs;
 using BlazorA2UI.Expressions;
@@ -12,20 +13,35 @@ namespace BlazorA2UI.Evaluation;
 /// </summary>
 public sealed class A2UIEvaluator
 {
-    /// <summary>Maximum nesting of calls and bindings in one evaluation.</summary>
+    /// <summary>
+    /// Maximum nesting of calls and bindings in one evaluation.
+    /// </summary>
     public const int MaxDepth = 64;
 
+    /// <summary>
+    /// Creates an evaluator.
+    /// </summary>
+    /// <param name="catalogs">The catalogs whose functions calls may use.</param>
+    /// <param name="services">Services passed to function implementations, or null.</param>
     public A2UIEvaluator(CatalogRegistry catalogs, IServiceProvider? services = null)
     {
         Catalogs = catalogs;
         Services = services;
     }
 
+    /// <summary>
+    /// Gets the catalogs that detached evaluations resolve functions in. Surface evaluations see only their surface's catalogs.
+    /// </summary>
     public CatalogRegistry Catalogs { get; }
 
+    /// <summary>
+    /// Gets the services function implementations can use, or null.
+    /// </summary>
     public IServiceProvider? Services { get; }
 
-    /// <summary>Evaluates <paramref name="value"/>. Literals are returned as copies.</summary>
+    /// <summary>
+    /// Evaluates <paramref name="value"/>. Literals are returned as copies.
+    /// </summary>
     public async ValueTask<JsonNode?> EvaluateAsync(JsonNode? value, EvaluationContext context, EvaluationScope scope)
     {
         scope.Depth++;
@@ -95,6 +111,9 @@ public sealed class A2UIEvaluator
         return null;
     }
 
+    /// <summary>
+    /// Awaits an asynchronous evaluation that is still running and runs <paramref name="onSettled"/> when it ends, whether it succeeded or failed. A failure is not rethrown; it surfaces on the next evaluation.
+    /// </summary>
     private static async Task ObserveAsync(ValueTask<JsonNode?> task, Action? onSettled)
     {
         try
@@ -130,6 +149,9 @@ public sealed class A2UIEvaluator
             $"The key '{key}' uses the reserved '@' prefix. Escape a literal '@' key by doubling it ('@{key}').");
     }
 
+    /// <summary>
+    /// Reads the value an <c>@path</c> binding points to, resolving relative paths against the context's scope. A missing path gives null.
+    /// </summary>
     private static JsonNode? ResolveBinding(JsonObject binding, EvaluationContext context)
     {
         if (binding.Count != 1)
@@ -142,6 +164,11 @@ public sealed class A2UIEvaluator
         return context.Data.TryGet(context.Resolve(path), out JsonNode? value) ? value?.DeepClone() : null;
     }
 
+    /// <summary>
+    /// Evaluates one <c>@call</c>: resolves its catalog and arguments, checks who may call it, then runs it locally or routes it to the agent.
+    /// </summary>
+    /// <returns>The function's result, or null while an argument or the call itself is still pending.</returns>
+    /// <exception cref="A2UIException">The call is malformed, its catalog or function is unknown, or the function failed.</exception>
     private async ValueTask<JsonNode?> CallAsync(JsonObject call, EvaluationContext context, EvaluationScope scope)
     {
         foreach ((string key, JsonNode? _) in call)
@@ -265,6 +292,9 @@ public sealed class A2UIEvaluator
         return await router.CallAsync(catalog.CatalogId, name, args, scope.CancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Whether a value contains NaN or an infinity anywhere, up to the nesting limit.
+    /// </summary>
     private static bool HasNonFiniteNumber(JsonNode? node, int depth) => depth <= MaxDepth && node switch
     {
         JsonValue v when v.TryGetValue<double>(out double d) => !double.IsFinite(d),
@@ -274,6 +304,10 @@ public sealed class A2UIEvaluator
         _ => false,
     };
 
+    /// <summary>
+    /// Enforces the call boundary for the evaluation mode: an agent may call only local functions that allow agent callers and need no user activation, and renderer content may not call agent-only functions, or functions that need user activation outside a user action.
+    /// </summary>
+    /// <exception cref="A2UIException">The call crosses a boundary; nothing has run.</exception>
     private static void CheckBoundaries(string name, FunctionDefinition? definition, EvaluationScope scope)
     {
         if (scope.Mode == EvaluationMode.AgentCall)
@@ -312,6 +346,10 @@ public sealed class A2UIEvaluator
         }
     }
 
+    /// <summary>
+    /// Evaluates a call's arguments, then applies the function's defaults and checks them against its argument schema.
+    /// </summary>
+    /// <returns>The resolved arguments. When an argument is still pending, <see cref="EvaluationScope.Pending"/> is set and the caller must not run the function.</returns>
     private async ValueTask<JsonObject> ResolveArgsAsync(
         string name,
         JsonObject? rawArgs,
@@ -355,9 +393,12 @@ public sealed class A2UIEvaluator
     /// Finds a catalog: through the surface when there is one, so only the catalogs it was
     /// created with are visible, and in the whole registry for detached evaluations.
     /// </summary>
-    private bool TryGetCatalog(EvaluationContext context, string catalogId, out Catalog catalog) =>
+    private bool TryGetCatalog(EvaluationContext context, string catalogId, [MaybeNullWhen(false)] out Catalog catalog) =>
         context.Surface is { } surface ? surface.TryGetCatalog(catalogId, out catalog) : Catalogs.TryGet(catalogId, out catalog);
 
+    /// <summary>
+    /// Checks the static nested calls in an agent's <c>callRendererFunction</c> arguments before any of them runs, so a call that crosses a boundary fails without side effects.
+    /// </summary>
     private void PreflightNestedCalls(JsonNode? node, Catalog defaultCatalog, EvaluationContext context, int depth)
     {
         if (depth > MaxDepth)
@@ -396,6 +437,9 @@ public sealed class A2UIEvaluator
         }
     }
 
+    /// <summary>
+    /// Runs a local function implementation. Exceptions other than A2UI errors and cancellation become <see cref="A2UIErrorCodes.ExecutionError"/>.
+    /// </summary>
     private static async ValueTask<JsonNode?> InvokeAsync(A2UIFunction implementation, FunctionInvocation invocation)
     {
         try
@@ -416,6 +460,10 @@ public sealed class A2UIEvaluator
         }
     }
 
+    /// <summary>
+    /// Evaluates a system function (a name starting with <c>@</c>); <c>@index</c> is the only one.
+    /// </summary>
+    /// <exception cref="A2UIException">The name is unknown, or <c>@index</c> is used outside a collection template.</exception>
     private async ValueTask<JsonNode?> CallSystemFunctionAsync(
         string name,
         JsonObject? rawArgs,

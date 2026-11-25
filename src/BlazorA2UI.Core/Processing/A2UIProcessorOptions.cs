@@ -1,18 +1,28 @@
 ﻿namespace BlazorA2UI.Processing;
 
-/// <summary>Settings for a <see cref="MessageProcessor"/>.</summary>
+/// <summary>
+/// Settings for a <see cref="MessageProcessor"/>.
+/// </summary>
 public sealed class A2UIProcessorOptions
 {
-    /// <summary>How long a renderer-initiated agent function call may wait for its answer.</summary>
+    /// <summary>
+    /// How long a renderer-initiated agent function call may wait for its answer.
+    /// </summary>
     public TimeSpan AgentCallTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>Maximum number of agent function calls waiting for an answer at once, per surface.</summary>
+    /// <summary>
+    /// Maximum number of agent function calls waiting for an answer at once, per surface.
+    /// </summary>
     public int MaxPendingAgentCalls { get; set; } = 64;
 
-    /// <summary>Maximum components on one surface.</summary>
+    /// <summary>
+    /// Maximum components on one surface.
+    /// </summary>
     public int MaxComponentsPerSurface { get; set; } = 5_000;
 
-    /// <summary>Maximum depth of the rendered component tree.</summary>
+    /// <summary>
+    /// Maximum depth of the rendered component tree.
+    /// </summary>
     public int MaxTreeDepth { get; set; } = 50;
 
     /// <summary>
@@ -27,6 +37,8 @@ public sealed class A2UIProcessorOptions
     /// </summary>
     public A2UIValidationConfig? Validation { get; set; }
 
-    /// <summary>Host services passed to function implementations (for example an <c>IA2UIUrlLauncher</c>).</summary>
+    /// <summary>
+    /// Host services passed to function implementations (for example an <c>IA2UIUrlLauncher</c>).
+    /// </summary>
     public IServiceProvider? Services { get; set; }
 }

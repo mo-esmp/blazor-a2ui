@@ -10,8 +10,12 @@ namespace BlazorA2UI.Text;
 /// .NET has no XID property tables, so exact tables from the Unicode Character Database are
 /// generated into <see cref="Uax31Tables"/>.
 /// </remarks>
-public static class Uax31
+internal static class Uax31
 {
+    /// <summary>
+    /// Whether <paramref name="value"/> is a UAX #31 identifier: an XID_Start code point or underscore, then XID_Continue code points.
+    /// </summary>
+    /// <returns>False for null and empty strings.</returns>
     public static bool IsIdentifier(string? value)
     {
         if (string.IsNullOrEmpty(value))
@@ -40,10 +44,19 @@ public static class Uax31
         return true;
     }
 
+    /// <summary>
+    /// Whether a code point has the XID_Start property.
+    /// </summary>
     public static bool IsXidStart(Rune rune) => InRanges(Uax31Tables.s_xidStart, rune.Value);
 
+    /// <summary>
+    /// Whether a code point has the XID_Continue property.
+    /// </summary>
     public static bool IsXidContinue(Rune rune) => InRanges(Uax31Tables.s_xidContinue, rune.Value);
 
+    /// <summary>
+    /// Binary-searches sorted inclusive start/end pairs for <paramref name="value"/>.
+    /// </summary>
     private static bool InRanges(int[] ranges, int value)
     {
         int lo = 0, hi = (ranges.Length / 2) - 1;

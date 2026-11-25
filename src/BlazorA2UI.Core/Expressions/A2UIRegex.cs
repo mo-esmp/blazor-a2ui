@@ -14,13 +14,31 @@ namespace BlazorA2UI.Expressions;
 /// safety check that rejects patterns prone to catastrophic backtracking. Accepted
 /// patterns are compiled to an equivalent .NET regex with a match timeout.
 /// </summary>
-public static class A2UIRegex
+internal static class A2UIRegex
 {
+    /// <summary>
+    /// The longest pattern accepted, in code points.
+    /// </summary>
     public const int MaxPatternCodePoints = 256;
+    /// <summary>
+    /// The longest value a pattern is matched against, in code points.
+    /// </summary>
     public const int MaxValueCodePoints = 4096;
+    /// <summary>
+    /// The largest bound a braced quantifier may use.
+    /// </summary>
     private const int MaxQuantifierBound = 65535;
+    /// <summary>
+    /// The largest Unicode code point.
+    /// </summary>
     private const int MaxCodePoint = 0x10FFFF;
+    /// <summary>
+    /// How long one match may run before it fails.
+    /// </summary>
     private static readonly TimeSpan s_matchTimeout = TimeSpan.FromMilliseconds(250);
+    /// <summary>
+    /// Compiled patterns by source pattern; cleared when it grows past its limit.
+    /// </summary>
     private static readonly ConcurrentDictionary<string, Regex> s_cache = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -45,7 +63,9 @@ public static class A2UIRegex
         }
     }
 
-    /// <summary>Validates <paramref name="pattern"/> and returns the compiled .NET regex.</summary>
+    /// <summary>
+    /// Validates <paramref name="pattern"/> and returns the compiled .NET regex.
+    /// </summary>
     public static Regex Compile(string pattern)
     {
         if (s_cache.TryGetValue(pattern, out Regex? cached))
@@ -64,7 +84,9 @@ public static class A2UIRegex
         return regex;
     }
 
-    /// <summary>Parses and safety-checks a pattern, throwing an expression error when it is rejected.</summary>
+    /// <summary>
+    /// Parses and safety-checks a pattern, throwing an expression error when it is rejected.
+    /// </summary>
     internal static Node Analyze(string pattern)
     {
         if (CountCodePoints(pattern) > MaxPatternCodePoints)
@@ -104,6 +126,9 @@ public static class A2UIRegex
         return tree;
     }
 
+    /// <summary>
+    /// Counts the code points in a string; a surrogate pair counts as one and a lone surrogate as one.
+    /// </summary>
     internal static int CountCodePoints(string input)
     {
         int count = 0;
@@ -122,45 +147,138 @@ public static class A2UIRegex
 
     // ---------------------------------------------------------------- AST
 
+    /// <summary>
+    /// An inclusive range of code points.
+    /// </summary>
+    /// <param name="Start">The first code point.</param>
+    /// <param name="End">The last code point.</param>
     internal readonly record struct Range(int Start, int End);
 
-    internal enum Anchor { Start, End, WordBoundary, NotWordBoundary }
+    /// <summary>
+    /// The zero-width assertions the dialect supports.
+    /// </summary>
+    internal enum Anchor
+    {
+        /// <summary>
+        /// <c>^</c>: the start of the input.
+        /// </summary>
+        Start,
 
+        /// <summary>
+        /// <c>$</c>: the end of the input.
+        /// </summary>
+        End,
+
+        /// <summary>
+        /// <c>\b</c>: an ASCII word boundary.
+        /// </summary>
+        WordBoundary,
+
+        /// <summary>
+        /// <c>\B</c>: not an ASCII word boundary.
+        /// </summary>
+        NotWordBoundary,
+    }
+
+    /// <summary>
+    /// A node of a parsed pattern.
+    /// </summary>
     internal abstract record Node;
 
+    /// <summary>
+    /// Matches the empty string.
+    /// </summary>
     internal sealed record EmptyNode : Node;
 
+    /// <summary>
+    /// Matches one code point from a set.
+    /// </summary>
+    /// <param name="Ranges">The code points in the set, normalized.</param>
     internal sealed record CharSetNode(IReadOnlyList<Range> Ranges) : Node;
 
+    /// <summary>
+    /// A group.
+    /// </summary>
+    /// <param name="Capturing">Whether the group captures.</param>
+    /// <param name="Child">The grouped pattern.</param>
     internal sealed record GroupNode(bool Capturing, Node Child) : Node;
 
+    /// <summary>
+    /// A lookahead assertion; parsed only so it can be rejected.
+    /// </summary>
+    /// <param name="Negated">Whether the lookahead is negative.</param>
+    /// <param name="Child">The asserted pattern.</param>
     internal sealed record LookaheadNode(bool Negated, Node Child) : Node;
 
+    /// <summary>
+    /// A zero-width assertion.
+    /// </summary>
+    /// <param name="Anchor">The assertion.</param>
     internal sealed record AnchorNode(Anchor Anchor) : Node;
 
+    /// <summary>
+    /// A sequence of nodes.
+    /// </summary>
+    /// <param name="Items">The nodes, in order.</param>
     internal sealed record ConcatNode(IReadOnlyList<Node> Items) : Node;
 
+    /// <summary>
+    /// An alternation.
+    /// </summary>
+    /// <param name="Branches">The alternatives, in order.</param>
     internal sealed record AltNode(IReadOnlyList<Node> Branches) : Node;
 
+    /// <summary>
+    /// A quantified node.
+    /// </summary>
+    /// <param name="Child">The repeated node.</param>
+    /// <param name="Min">The minimum count.</param>
+    /// <param name="Max">The maximum count, or null for no limit.</param>
+    /// <param name="Lazy">Whether the quantifier is lazy.</param>
     internal sealed record RepeatNode(Node Child, int Min, int? Max, bool Lazy) : Node;
 
+    /// <summary>
+    /// A syntax error in a pattern; turned into an expression error at the public boundary.
+    /// </summary>
+    /// <param name="message">The error message.</param>
     private sealed class RegexSyntaxException(string message) : Exception(message);
 
     // ------------------------------------------------------------ ranges
 
+    /// <summary>
+    /// The surrogate code points, which never match on their own.
+    /// </summary>
     private static readonly Range s_surrogates = new(0xD800, 0xDFFF);
+    /// <summary>
+    /// The code points of <c>\d</c>: ASCII digits only.
+    /// </summary>
     private static readonly Range[] s_digitRanges = [new(0x30, 0x39)];
+    /// <summary>
+    /// The code points of <c>\w</c>: ASCII letters, digits and underscore only.
+    /// </summary>
     private static readonly Range[] s_wordRanges = [new(0x30, 0x39), new(0x41, 0x5A), new(0x5F, 0x5F), new(0x61, 0x7A)];
 
+    /// <summary>
+    /// The code points of <c>\s</c>: ECMAScript white space and line terminators.
+    /// </summary>
     private static readonly Range[] s_spaceRanges =
     [
         new(0x09, 0x0D), new(0x20, 0x20), new(0xA0, 0xA0), new(0x1680, 0x1680), new(0x2000, 0x200A),
         new(0x2028, 0x2029), new(0x202F, 0x202F), new(0x205F, 0x205F), new(0x3000, 0x3000), new(0xFEFF, 0xFEFF),
     ];
 
+    /// <summary>
+    /// The line terminators, which <c>.</c> does not match.
+    /// </summary>
     private static readonly Range[] s_lineTerminators = [new(0x0A, 0x0A), new(0x0D, 0x0D), new(0x2028, 0x2029)];
+    /// <summary>
+    /// The code points of <c>.</c>: everything but the line terminators.
+    /// </summary>
     private static readonly IReadOnlyList<Range> s_dotRanges = Complement(s_lineTerminators);
 
+    /// <summary>
+    /// Splits a range around the surrogate block, yielding the parts outside it.
+    /// </summary>
     private static IEnumerable<Range> ExcludeSurrogates(Range r)
     {
         if (r.Start > r.End)
@@ -185,6 +303,9 @@ public static class A2UIRegex
         }
     }
 
+    /// <summary>
+    /// Drops surrogates, sorts the ranges and merges the ones that overlap or touch.
+    /// </summary>
     internal static IReadOnlyList<Range> Normalize(IEnumerable<Range> ranges)
     {
         List<Range> split = ranges.SelectMany(ExcludeSurrogates).OrderBy(r => r.Start).ThenBy(r => r.End).ToList();
@@ -211,6 +332,9 @@ public static class A2UIRegex
         return merged;
     }
 
+    /// <summary>
+    /// Returns every non-surrogate code point not in <paramref name="ranges"/>.
+    /// </summary>
     internal static IReadOnlyList<Range> Complement(IEnumerable<Range> ranges)
     {
         IReadOnlyList<Range> excluded = Normalize(ranges.Append(s_surrogates).SelectMany(r => new[] { r }));
@@ -237,6 +361,9 @@ public static class A2UIRegex
         return result.SelectMany(ExcludeSurrogates).ToList();
     }
 
+    /// <summary>
+    /// Whether two normalized range lists share a code point.
+    /// </summary>
     private static bool Overlap(IReadOnlyList<Range> a, IReadOnlyList<Range> b)
     {
         int i = 0, j = 0;
@@ -259,6 +386,9 @@ public static class A2UIRegex
         return false;
     }
 
+    /// <summary>
+    /// Splits a pattern into code points, keeping a lone surrogate as its own value.
+    /// </summary>
     private static int[] ToCodePoints(string pattern)
     {
         List<int> cps = new(pattern.Length);
@@ -290,16 +420,37 @@ public static class A2UIRegex
 
     // ------------------------------------------------------------ parser
 
+    /// <summary>
+    /// A recursive-descent parser for the A2UI regex dialect (ECMAScript syntax with Unicode semantics).
+    /// </summary>
+    /// <param name="cps">The pattern's code points.</param>
     private sealed class Parser(int[] cps)
     {
+        /// <summary>
+        /// The index of the next code point to read.
+        /// </summary>
         private int _pos;
 
+        /// <summary>
+        /// Gets whether the whole pattern has been read.
+        /// </summary>
         private bool Eof => _pos >= cps.Length;
 
+        /// <summary>
+        /// Returns the code point <paramref name="offset"/> places ahead without consuming it, or null past the end.
+        /// </summary>
         private int? Peek(int offset = 0) => _pos + offset < cps.Length ? cps[_pos + offset] : null;
 
+        /// <summary>
+        /// Consumes and returns the next code point.
+        /// </summary>
+        /// <exception cref="RegexSyntaxException">The pattern has ended.</exception>
         private int Next() => !Eof ? cps[_pos++] : throw new RegexSyntaxException("Unexpected end of pattern");
 
+        /// <summary>
+        /// Consumes the next code point when it is <paramref name="cp"/>.
+        /// </summary>
+        /// <returns>False, consuming nothing, when the next code point is different.</returns>
         private bool Eat(int cp)
         {
             if (Peek() == cp)
@@ -311,6 +462,10 @@ public static class A2UIRegex
             return false;
         }
 
+        /// <summary>
+        /// Parses the whole pattern.
+        /// </summary>
+        /// <exception cref="RegexSyntaxException">The pattern is not valid in the dialect.</exception>
         public Node ParsePattern()
         {
             Node tree = ParseDisjunction();
@@ -322,6 +477,9 @@ public static class A2UIRegex
             return tree;
         }
 
+        /// <summary>
+        /// Parses alternatives separated by <c>|</c>.
+        /// </summary>
         private Node ParseDisjunction()
         {
             List<Node> branches = new() { ParseAlternative() };
@@ -333,6 +491,9 @@ public static class A2UIRegex
             return branches.Count == 1 ? branches[0] : new AltNode(branches);
         }
 
+        /// <summary>
+        /// Parses one alternative: a sequence of terms.
+        /// </summary>
         private Node ParseAlternative()
         {
             List<Node> items = new();
@@ -349,6 +510,9 @@ public static class A2UIRegex
             };
         }
 
+        /// <summary>
+        /// Parses one term: an atom or an anchor, with its quantifier if it has one.
+        /// </summary>
         private Node ParseTerm()
         {
             Node atom = ParseAtom();
@@ -365,8 +529,15 @@ public static class A2UIRegex
             return ParseQuantifier(atom);
         }
 
+        /// <summary>
+        /// Whether a code point starts a quantifier.
+        /// </summary>
         private static bool IsQuantifierStart(int? cp) => cp is '*' or '+' or '?' or '{';
 
+        /// <summary>
+        /// Parses the quantifier after <paramref name="child"/>.
+        /// </summary>
+        /// <exception cref="RegexSyntaxException">The quantifier is malformed, or its bounds are out of order or above the limit.</exception>
         private Node ParseQuantifier(Node child)
         {
             int q = Next();
@@ -397,6 +568,9 @@ public static class A2UIRegex
             return new RepeatNode(child, min, max, lazy);
         }
 
+        /// <summary>
+        /// Parses a run of decimal digits, or returns null when there is none.
+        /// </summary>
         private int? ParseDecimal()
         {
             if (Peek() is not (>= '0' and <= '9'))
@@ -413,6 +587,9 @@ public static class A2UIRegex
             return (int)value;
         }
 
+        /// <summary>
+        /// Parses the bounds of a <c>{n}</c>, <c>{n,}</c> or <c>{n,m}</c> quantifier.
+        /// </summary>
         private (int Min, int? Max) ParseBracedBounds()
         {
             int min = ParseDecimal() ?? throw new RegexSyntaxException("Malformed brace quantifier");
@@ -455,6 +632,9 @@ public static class A2UIRegex
             return (min, max);
         }
 
+        /// <summary>
+        /// Parses one atom: a literal, <c>.</c>, an escape, a class or a group.
+        /// </summary>
         private Node ParseAtom()
         {
             int cp = Next();
@@ -473,6 +653,7 @@ public static class A2UIRegex
                 case '\\':
                     {
                         (int? Single, IReadOnlyList<Range>? Ranges, Anchor? Anchor) esc = ParseEscape(inClass: false);
+                        // ParseEscape sets exactly one of Single, Ranges and Anchor, so Single is set here.
                         return esc.Anchor is { } a ? new AnchorNode(a)
                             : esc.Ranges is { } r ? new CharSetNode(r)
                             : new CharSetNode([new Range(esc.Single!.Value, esc.Single.Value)]);
@@ -486,6 +667,9 @@ public static class A2UIRegex
             }
         }
 
+        /// <summary>
+        /// Parses a group, including the lookahead and lookbehind forms that are rejected later.
+        /// </summary>
         private Node ParseGroup()
         {
             if (!Eat('?'))
@@ -515,6 +699,9 @@ public static class A2UIRegex
             return modifier == ':' ? new GroupNode(false, inner) : new LookaheadNode(modifier == '!', inner);
         }
 
+        /// <summary>
+        /// Parses a character class (<c>[...]</c> or <c>[^...]</c>).
+        /// </summary>
         private Node ParseClass()
         {
             bool negated = Eat('^');
@@ -538,6 +725,9 @@ public static class A2UIRegex
             return new CharSetNode(negated ? Complement(normalized) : normalized);
         }
 
+        /// <summary>
+        /// Parses one class item: a single code point, an escape class, or a range.
+        /// </summary>
         private IReadOnlyList<Range> ParseClassItem()
         {
             (int? Single, IReadOnlyList<Range> Ranges) first = ParseClassAtom();
@@ -566,6 +756,10 @@ public static class A2UIRegex
             return [new Range(first.Single.Value, second.Single.Value)];
         }
 
+        /// <summary>
+        /// Parses one class atom.
+        /// </summary>
+        /// <returns>Either a single code point or a set of ranges.</returns>
         private (int? Single, IReadOnlyList<Range> Ranges) ParseClassAtom()
         {
             int? cp = Peek();
@@ -600,6 +794,12 @@ public static class A2UIRegex
             return (lit, [new Range(lit, lit)]);
         }
 
+        /// <summary>
+        /// Parses an escape after the backslash.
+        /// </summary>
+        /// <param name="inClass">Whether the escape is inside a character class, where <c>\b</c> means backspace.</param>
+        /// <returns>A single code point, a set of ranges, or an anchor.</returns>
+        /// <exception cref="RegexSyntaxException">The escape is unknown or a backreference.</exception>
         private (int? Single, IReadOnlyList<Range>? Ranges, Anchor? Anchor) ParseEscape(bool inClass)
         {
             if (Eof)
@@ -663,6 +863,9 @@ public static class A2UIRegex
             }
         }
 
+        /// <summary>
+        /// Parses exactly <paramref name="digits"/> hexadecimal digits.
+        /// </summary>
         private int ParseFixedHex(int digits)
         {
             int value = 0;
@@ -681,6 +884,9 @@ public static class A2UIRegex
             return value;
         }
 
+        /// <summary>
+        /// Parses a <c>\u</c> escape: four hex digits, a surrogate pair of escapes, or <c>{...}</c> with up to six.
+        /// </summary>
         private int ParseUnicodeEscape()
         {
             int value;
@@ -723,6 +929,9 @@ public static class A2UIRegex
             return value;
         }
 
+        /// <summary>
+        /// Returns the value of a hexadecimal digit, or -1 when the code point is not one.
+        /// </summary>
         private static int HexValue(int? cp) => cp switch
         {
             >= '0' and <= '9' => cp.Value - '0',
@@ -734,6 +943,9 @@ public static class A2UIRegex
 
     // ------------------------------------------------------- safety check
 
+    /// <summary>
+    /// Strips any groups around a node.
+    /// </summary>
     private static Node Unwrap(Node node)
     {
         while (node is GroupNode g)
@@ -744,6 +956,9 @@ public static class A2UIRegex
         return node;
     }
 
+    /// <summary>
+    /// Whether a node can match the empty string.
+    /// </summary>
     private static bool Nullable(Node node) => node switch
     {
         EmptyNode or AnchorNode or LookaheadNode => true,
@@ -755,6 +970,9 @@ public static class A2UIRegex
         _ => false,
     };
 
+    /// <summary>
+    /// The code points a node's match can start with.
+    /// </summary>
     private static IReadOnlyList<Range> First(Node node)
     {
         switch (node)
@@ -787,6 +1005,9 @@ public static class A2UIRegex
         }
     }
 
+    /// <summary>
+    /// Every code point a node's match can contain.
+    /// </summary>
     private static IReadOnlyList<Range> Chars(Node node) => node switch
     {
         CharSetNode cs => cs.Ranges,
@@ -797,6 +1018,9 @@ public static class A2UIRegex
         _ => [],
     };
 
+    /// <summary>
+    /// Whether a node contains an unbounded quantifier.
+    /// </summary>
     private static bool HasUnbounded(Node node) => node switch
     {
         GroupNode g => HasUnbounded(g.Child),
@@ -807,6 +1031,9 @@ public static class A2UIRegex
         _ => false,
     };
 
+    /// <summary>
+    /// Whether an unbounded quantifier repeats something that is itself unbounded, like <c>(a+)+</c>; such patterns can backtrack exponentially.
+    /// </summary>
     private static bool HasNestedQuantifier(Node node) => node switch
     {
         GroupNode g => HasNestedQuantifier(g.Child),
@@ -817,6 +1044,9 @@ public static class A2UIRegex
         _ => false,
     };
 
+    /// <summary>
+    /// Whether two branches of an alternation can start with the same code point.
+    /// </summary>
     private static bool BranchesOverlap(IReadOnlyList<Node> branches)
     {
         List<IReadOnlyList<Range>> firsts = branches.Select(b => First(Unwrap(b))).ToList();
@@ -834,6 +1064,9 @@ public static class A2UIRegex
         return false;
     }
 
+    /// <summary>
+    /// Whether an unbounded repetition holds an alternation whose branches overlap, like <c>(a|a)*</c>.
+    /// </summary>
     private static bool HasOverlappingAlternation(Node node) => node switch
     {
         GroupNode g => HasOverlappingAlternation(g.Child),
@@ -845,6 +1078,9 @@ public static class A2UIRegex
         _ => false,
     };
 
+    /// <summary>
+    /// Whether two unbounded repetitions next to each other (with only optional nodes between) can match the same code points, like <c>a*a*</c>.
+    /// </summary>
     private static bool ConcatHasAdjacentOverlap(IReadOnlyList<Node> items)
     {
         for (int i = 0; i < items.Count; i++)
@@ -872,6 +1108,9 @@ public static class A2UIRegex
         return false;
     }
 
+    /// <summary>
+    /// Whether any sequence in a node has adjacent overlapping repetitions.
+    /// </summary>
     private static bool HasAdjacentOverlap(Node node) => node switch
     {
         GroupNode g => HasAdjacentOverlap(g.Child),
@@ -884,8 +1123,14 @@ public static class A2UIRegex
 
     // ------------------------------------------------------------ emitter
 
+    /// <summary>
+    /// The ASCII word class that <c>\w</c> and word boundaries are emitted as.
+    /// </summary>
     private const string AsciiWord = "[0-9A-Z_a-z]";
 
+    /// <summary>
+    /// Emits a parsed pattern as an equivalent .NET pattern with ASCII-only classes and code-point semantics.
+    /// </summary>
     internal static string Emit(Node node)
     {
         StringBuilder sb = new();
@@ -893,6 +1138,9 @@ public static class A2UIRegex
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Appends the .NET form of <paramref name="node"/> to <paramref name="sb"/>.
+    /// </summary>
     private static void Emit(Node node, StringBuilder sb)
     {
         switch (node)
@@ -956,6 +1204,9 @@ public static class A2UIRegex
         }
     }
 
+    /// <summary>
+    /// Appends a code-point set, splitting astral ranges into UTF-16 surrogate sequences.
+    /// </summary>
     private static void EmitCharSet(IReadOnlyList<Range> ranges, StringBuilder sb)
     {
         List<Range> bmp = ranges.Where(r => r.Start <= 0xFFFF).Select(r => new Range(r.Start, Math.Min(r.End, 0xFFFF))).ToList();
@@ -1009,6 +1260,9 @@ public static class A2UIRegex
         }
     }
 
+    /// <summary>
+    /// Splits an astral code point into its UTF-16 surrogates.
+    /// </summary>
     private static (int High, int Low) Split(int cp)
     {
         int v = cp - 0x10000;

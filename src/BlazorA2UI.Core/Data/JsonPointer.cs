@@ -7,11 +7,16 @@ namespace BlazorA2UI.Data;
 /// segments are collapsed (<c>//a///b//</c> is <c>/a/b</c>), and relative
 /// paths resolve against a data context path.
 /// </summary>
-public static class JsonPointer
+internal static class JsonPointer
 {
+    /// <summary>
+    /// Segments that are rejected in data paths, so a model cannot write to prototype-like keys that a JavaScript host might interpret.
+    /// </summary>
     private static readonly HashSet<string> s_forbiddenSegments = ["__proto__", "constructor", "prototype"];
 
-    /// <summary>Splits a pointer into unescaped segments. The root is an empty list.</summary>
+    /// <summary>
+    /// Splits a pointer into unescaped segments. The root is an empty list.
+    /// </summary>
     public static IReadOnlyList<string> Parse(string pointer)
     {
         ArgumentNullException.ThrowIfNull(pointer);
@@ -35,7 +40,9 @@ public static class JsonPointer
         return segments;
     }
 
-    /// <summary>Builds a canonical pointer from unescaped segments.</summary>
+    /// <summary>
+    /// Builds a canonical pointer from unescaped segments.
+    /// </summary>
     public static string Format(IEnumerable<string> segments)
     {
         StringBuilder sb = new();
@@ -47,7 +54,9 @@ public static class JsonPointer
         return sb.Length == 0 ? "/" : sb.ToString();
     }
 
-    /// <summary>Returns the canonical form of an absolute pointer.</summary>
+    /// <summary>
+    /// Returns the canonical form of an absolute pointer.
+    /// </summary>
     public static string Normalize(string pointer) => Format(Parse(pointer));
 
     /// <summary>
@@ -73,7 +82,9 @@ public static class JsonPointer
         return Format(segments);
     }
 
-    /// <summary>True when <paramref name="ancestor"/> is <paramref name="path"/> or one of its ancestors.</summary>
+    /// <summary>
+    /// True when <paramref name="ancestor"/> is <paramref name="path"/> or one of its ancestors.
+    /// </summary>
     public static bool IsSameOrAncestor(IReadOnlyList<string> ancestor, IReadOnlyList<string> path)
     {
         if (ancestor.Count > path.Count)
@@ -92,7 +103,13 @@ public static class JsonPointer
         return true;
     }
 
+    /// <summary>
+    /// Escapes one key as a JSON Pointer segment (<c>~</c> becomes <c>~0</c> and <c>/</c> becomes <c>~1</c>).
+    /// </summary>
     public static string Escape(string segment) => segment.Replace("~", "~0").Replace("/", "~1");
 
+    /// <summary>
+    /// Unescapes one JSON Pointer segment, reversing <see cref="Escape"/>.
+    /// </summary>
     public static string Unescape(string segment) => segment.Replace("~1", "/").Replace("~0", "~");
 }

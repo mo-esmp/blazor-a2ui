@@ -2,7 +2,9 @@
 
 namespace BlazorA2UI.Evaluation;
 
-/// <summary>Routes renderer function calls that have no local implementation to the agent.</summary>
+/// <summary>
+/// Routes renderer function calls that have no local implementation to the agent.
+/// </summary>
 public interface IAgentFunctionRouter
 {
     /// <summary>
@@ -20,6 +22,8 @@ public interface IAgentFunctionRouter
     /// <param name="pending">Set while the agent has not answered.</param>
     JsonNode? GetOrStart(string catalogId, string name, JsonObject args, ISet<string>? requested, out bool pending);
 
-    /// <summary>For actions: sends a fresh call and waits for the agent's answer.</summary>
+    /// <summary>
+    /// For actions: sends a fresh call and waits for the agent's answer.
+    /// </summary>
     Task<JsonNode?> CallAsync(string catalogId, string name, JsonObject args, CancellationToken cancellationToken);
 }

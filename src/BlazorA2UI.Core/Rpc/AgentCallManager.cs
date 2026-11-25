@@ -13,16 +13,40 @@ namespace BlazorA2UI.Rpc;
 /// </summary>
 internal sealed class AgentCallManager : IAgentFunctionRouter
 {
+    /// <summary>
+    /// The surface whose calls this manager routes.
+    /// </summary>
     private readonly Surface _surface;
+    /// <summary>
+    /// Calls made by bindings, by call key, so equal calls share one request.
+    /// </summary>
     private readonly Dictionary<string, ReactiveEntry> _reactive = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Calls waiting for an answer, by function call id.
+    /// </summary>
     private readonly Dictionary<string, PendingCall> _pending = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Guards the call maps.
+    /// </summary>
     private readonly object _gate = new();
 
+    /// <summary>
+    /// Creates the manager for <paramref name="surface"/>.
+    /// </summary>
     public AgentCallManager(Surface surface)
     {
         _surface = surface;
     }
 
+    /// <summary>
+    /// Returns the agent's answer to a binding's call, starting the call if needed.
+    /// </summary>
+    /// <param name="catalogId">The catalog the function belongs to.</param>
+    /// <param name="name">The function name.</param>
+    /// <param name="args">The resolved arguments.</param>
+    /// <param name="requested">The calls the binding has asked for before, or null; a failed call is sent again only for a binding that never asked for it.</param>
+    /// <param name="pending">Set when the answer has not arrived; the result is then null.</param>
+    /// <exception cref="A2UIException">The call failed or was cancelled, or it could not be sent.</exception>
     public JsonNode? GetOrStart(string catalogId, string name, JsonObject args, ISet<string>? requested, out bool pending)
     {
         string key = CacheKey(catalogId, name, args);
@@ -31,7 +55,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         {
             bool askedBefore = requested is null || requested.Contains(key);
             requested?.Add(key);
-            if (_reactive.TryGetValue(key, out entry) && entry.Call!.Task.IsFaulted && !askedBefore)
+            if (_reactive.TryGetValue(key, out entry) && entry.Call.Task.IsFaulted && !askedBefore)
             {
                 // A binding that never asked for this call gets a fresh attempt after a failure.
                 _reactive.Remove(key);
@@ -40,7 +64,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
 
             if (entry is null)
             {
-                entry = new ReactiveEntry { Call = Send(catalogId, name, args) };
+                entry = new ReactiveEntry(Send(catalogId, name, args));
                 _reactive[key] = entry;
                 entry.Call.Task.ContinueWith(
                     t => OnReactiveSettled(key, t),
@@ -50,7 +74,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
             }
         }
 
-        Task<JsonNode?> task = entry.Call!.Task;
+        Task<JsonNode?> task = entry.Call.Task;
         if (!task.IsCompleted)
         {
             pending = true;
@@ -60,7 +84,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         pending = false;
         if (task.IsCompletedSuccessfully)
         {
-            return task.Result?.DeepClone();
+            return entry.Call.Value?.DeepClone();
         }
 
         A2UIException error = task.Exception?.GetBaseException() as A2UIException
@@ -70,6 +94,10 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
             : new A2UIExpressionException($"Agent function '{name}' failed: {error.Message}");
     }
 
+    /// <summary>
+    /// Calls an agent function from an action and waits for the answer.
+    /// </summary>
+    /// <exception cref="A2UIException">The call failed, timed out, was cancelled, or could not be sent.</exception>
     public async Task<JsonNode?> CallAsync(string catalogId, string name, JsonObject args, CancellationToken cancellationToken)
     {
         PendingCall call = Send(catalogId, name, args);
@@ -88,7 +116,9 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         }
     }
 
-    /// <summary>Settles a call with the agent's <c>agentFunctionResponse</c>.</summary>
+    /// <summary>
+    /// Settles a call with the agent's <c>agentFunctionResponse</c>.
+    /// </summary>
     public bool TryComplete(string functionCallId, JsonObject response)
     {
         PendingCall? call;
@@ -117,6 +147,9 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         return true;
     }
 
+    /// <summary>
+    /// Whether a call with this id is waiting for an answer here.
+    /// </summary>
     public bool Owns(string functionCallId)
     {
         lock (_gate)
@@ -125,7 +158,9 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         }
     }
 
-    /// <summary>Cancels every pending call (when the surface is deleted).</summary>
+    /// <summary>
+    /// Cancels every pending call (when the surface is deleted).
+    /// </summary>
     public void CancelAll(string reason)
     {
         List<PendingCall> calls;
@@ -142,6 +177,10 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         }
     }
 
+    /// <summary>
+    /// Sends a <c>callAgentFunction</c> message and registers the call, with its timeout.
+    /// </summary>
+    /// <exception cref="A2UIExpressionException">The renderer has no connection to the agent, or too many calls are already waiting.</exception>
     private PendingCall Send(string catalogId, string name, JsonObject args)
     {
         MessageProcessor processor = _surface.Processor;
@@ -200,6 +239,9 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         return call;
     }
 
+    /// <summary>
+    /// Handles a binding's call settling: a cancelled call is forgotten so it can be sent again; otherwise the surface is told to re-evaluate.
+    /// </summary>
     private void OnReactiveSettled(string key, Task<JsonNode?> task)
     {
         if (task.IsCanceled || task.Exception?.GetBaseException() is A2UIException { Code: A2UIErrorCodes.Cancelled })
@@ -220,6 +262,9 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         }
     }
 
+    /// <summary>
+    /// Builds the key that identifies equal calls: catalog, name and the arguments in canonical JSON.
+    /// </summary>
     internal static string CacheKey(string catalogId, string name, JsonObject args)
     {
         StringBuilder sb = new();
@@ -228,6 +273,9 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Writes a value as canonical JSON, with object keys in ordinal order.
+    /// </summary>
     private static void WriteCanonical(JsonNode? node, StringBuilder sb)
     {
         switch (node)
@@ -272,23 +320,64 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         }
     }
 
-    private sealed class ReactiveEntry
+    /// <summary>
+    /// A binding call shared by every binding that makes the same call.
+    /// </summary>
+    /// <param name="call">The call sent to the agent.</param>
+    private sealed class ReactiveEntry(PendingCall call)
     {
-        public PendingCall? Call { get; set; }
+        /// <summary>
+        /// Gets the call sent to the agent.
+        /// </summary>
+        public PendingCall Call { get; } = call;
     }
 
+    /// <summary>
+    /// One call sent to the agent, settled by its answer, a timeout or cancellation.
+    /// </summary>
+    /// <param name="functionCallId">The id sent with the call.</param>
     private sealed class PendingCall(string functionCallId)
     {
+        /// <summary>
+        /// Completes <see cref="Task"/> when the call settles.
+        /// </summary>
         private readonly TaskCompletionSource<JsonNode?> _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        /// <summary>
+        /// Gets the id sent with the call.
+        /// </summary>
         public string FunctionCallId { get; } = functionCallId;
 
+        /// <summary>
+        /// Gets the task that completes with the answer or fails with the call's error.
+        /// </summary>
         public Task<JsonNode?> Task => _tcs.Task;
 
-        public void Succeed(JsonNode? value) => _tcs.TrySetResult(value);
+        /// <summary>
+        /// Gets the answer, once the call has succeeded.
+        /// </summary>
+        public JsonNode? Value { get; private set; }
 
+        /// <summary>
+        /// Settles the call with the agent's answer; a call that has already settled is unchanged.
+        /// </summary>
+        public void Succeed(JsonNode? value)
+        {
+            if (!_tcs.Task.IsCompleted)
+            {
+                Value = value;
+                _tcs.TrySetResult(value);
+            }
+        }
+
+        /// <summary>
+        /// Fails the call with <paramref name="error"/>; a call that has already settled is unchanged.
+        /// </summary>
         public void Fail(A2UIException error) => _tcs.TrySetException(error);
 
+        /// <summary>
+        /// Cancels the call with a <see cref="A2UIErrorCodes.Cancelled"/> error; a call that has already settled is unchanged.
+        /// </summary>
         public void Cancel(string reason) =>
             _tcs.TrySetException(new A2UIException(A2UIErrorCodes.Cancelled, reason) { FunctionCallId = FunctionCallId });
     }

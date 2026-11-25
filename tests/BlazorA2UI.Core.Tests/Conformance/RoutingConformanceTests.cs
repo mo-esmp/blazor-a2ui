@@ -4,6 +4,7 @@ using BlazorA2UI.Catalogs;
 using BlazorA2UI.Evaluation;
 using BlazorA2UI.Model;
 using BlazorA2UI.Processing;
+using Shouldly;
 using Xunit;
 
 namespace BlazorA2UI.Tests.Conformance;
@@ -13,23 +14,37 @@ namespace BlazorA2UI.Tests.Conformance;
 /// with <c>callAgentFunction</c>, following "Writing cases for route_agent_function" in the
 /// conformance README.
 /// </summary>
-public class RoutingConformanceTests
+public sealed class RoutingConformanceTests
 {
+    /// <summary>
+    /// The suite file this harness runs.
+    /// </summary>
     private const string File = "agent_function_routing.yaml";
 
     // Re-evaluating a binding whose cancelled call should be sent again has two cases in the suite,
     // one per re-evaluation model (see the conformance README). This renderer re-evaluates on any
     // surface change, like the Python and Swift cores, and writing an equal value is not a change.
+    /// <summary>
+    /// The one routing case written for the other re-evaluation model; see the comment above.
+    /// </summary>
     private const string OtherReevaluationModel = "test_agent_routing_cancelled_call_is_sent_again_when_its_value_is_rewritten";
 
+    /// <summary>
+    /// Gets the v1.0 routing cases, as theory data.
+    /// </summary>
     public static IEnumerable<object[]> Cases() =>
         ConformanceData.Names(File, c => Str(c["action"]) == "route_agent_function" && Str(c["protocolVersion"]) == "1.0"
                                          && Str(c["name"]) != OtherReevaluationModel);
 
+    /// <summary>
+    /// Proves that function calls are routed to the agent, answered, cancelled and reported as the suite expects.
+    /// </summary>
+    /// <param name="name">The case name.</param>
     [Theory]
     [MemberData(nameof(Cases))]
-    public async Task Route(string name)
+    public async Task RouteAgentFunction_ConformanceCase_MatchesSuiteAsync(string name)
     {
+        // Arrange
         JsonObject c = ConformanceData.Case(File, name);
         List<Catalog> catalogs = (c["catalogs"] as JsonArray ?? []).OfType<JsonObject>().Select(BuildCatalog).ToList();
         MessageProcessor processor = new(catalogs);
@@ -74,6 +89,7 @@ public class RoutingConformanceTests
             }
         };
         int stepIndex = 0;
+        // Act and Assert: each step runs, then its outbound calls, errors, actions and values are checked.
         foreach (JsonObject step in (c["steps"] as JsonArray ?? []).OfType<JsonObject>())
         {
             string label = $"{name} step {stepIndex++}";
@@ -93,20 +109,20 @@ public class RoutingConformanceTests
                         binding.Refresh();
                         break;
                     case "action":
-                        await Dispatch(processor, surface, new JsonObject { ["functionCall"] = call.DeepClone() });
+                        await DispatchAsync(processor, surface, new JsonObject { ["functionCall"] = call.DeepClone() });
                         break;
                     case "event":
-                        await Dispatch(processor, surface, new JsonObject { ["event"] = call.DeepClone() });
+                        await DispatchAsync(processor, surface, new JsonObject { ["event"] = call.DeepClone() });
                         break;
                 }
             }
             else if (step["respond"] is JsonObject respond)
             {
-                int index = (int)A2UIValues.ToDouble(respond["call"])!.Value;
+                int index = (int)A2UIValues.ToDouble(respond["call"]).Required();
                 JsonObject body = new() { ["functionCallId"] = sentCalls[index] };
                 if (respond.ContainsKey("error"))
                 {
-                    body["error"] = respond["error"]!.DeepClone();
+                    body["error"] = respond["error"].Required().DeepClone();
                 }
                 else
                 {
@@ -117,7 +133,7 @@ public class RoutingConformanceTests
             }
             else if (step["updateData"] is JsonObject update)
             {
-                surface.DataModel.Set(Str(update["path"])!, update["value"]?.DeepClone());
+                surface.DataModel.Set(Str(update["path"]).Required(), update["value"]?.DeepClone());
             }
             else if (step.ContainsKey("cancelSurfaceCalls"))
             {
@@ -128,7 +144,7 @@ public class RoutingConformanceTests
                 processor.Process(new JsonObject { ["version"] = "1.0", ["deleteSurface"] = new JsonObject { ["surfaceId"] = "main" } });
             }
 
-            await Settle(processor);
+            await SettleAsync(processor);
 
             List<JsonObject> messages;
             lock (outbound)
@@ -136,24 +152,23 @@ public class RoutingConformanceTests
                 messages = [.. outbound];
             }
 
-            List<JsonObject> calls = messages.Where(m => m["callAgentFunction"] is JsonObject).Select(m => m["callAgentFunction"]!.AsObject()).ToList();
+            List<JsonObject> calls = messages.Where(m => m["callAgentFunction"] is JsonObject).Select(m => m["callAgentFunction"].Required().AsObject()).ToList();
             foreach (JsonObject? sent in calls)
             {
-                Assert.Equal("main", Str(sent["surfaceId"]));
-                sentCalls.Add(Str(sent["functionCallId"])!);
+                Str(sent["surfaceId"]).ShouldBe("main");
+                sentCalls.Add(Str(sent["functionCallId"]).Required());
             }
 
             JsonArray expectedOutbound = step["expectOutbound"] as JsonArray ?? [];
             List<JsonNode?> actualPayloads = calls.Select(m => m["callFunction"]).ToList();
-            Assert.True(expectedOutbound.Count == actualPayloads.Count,
-                $"{label}: expected {expectedOutbound.Count} outbound calls, got {actualPayloads.Count}: {string.Join(", ", actualPayloads.Select(p => p?.ToJsonString()))}");
+            actualPayloads.Count.ShouldBe(expectedOutbound.Count, $"{label}: expected {expectedOutbound.Count} outbound calls, got {actualPayloads.Count}: {string.Join(", ", actualPayloads.Select(p => p?.ToJsonString()))}");
             if (step["outboundInAnyOrder"] is JsonValue anyOrder && anyOrder.GetValueKind() == JsonValueKind.True)
             {
                 List<JsonNode?> remaining = actualPayloads.ToList();
                 foreach (JsonNode? expected in expectedOutbound)
                 {
                     int match = remaining.FindIndex(a => JsonNode.DeepEquals(Normalize(expected), Normalize(a)));
-                    Assert.True(match >= 0, $"{label}: no outbound call matches {expected?.ToJsonString()}");
+                    (match >= 0).ShouldBeTrue($"{label}: no outbound call matches {expected?.ToJsonString()}");
                     remaining.RemoveAt(match);
                 }
             }
@@ -166,28 +181,26 @@ public class RoutingConformanceTests
             }
 
             JsonArray expectedErrors = step["expectErrors"] as JsonArray ?? [];
-            Assert.True(expectedErrors.Count == errors.Count,
-                $"{label}: expected {expectedErrors.Count} errors, got {errors.Count}: {string.Join("; ", errors.Select(e => e.Code + " " + e.Message))}");
+            errors.Count.ShouldBe(expectedErrors.Count, $"{label}: expected {expectedErrors.Count} errors, got {errors.Count}: {string.Join("; ", errors.Select(e => e.Code + " " + e.Message))}");
             for (int i = 0; i < expectedErrors.Count; i++)
             {
-                JsonObject expected = expectedErrors[i]!.AsObject();
+                JsonObject expected = expectedErrors[i].Required().AsObject();
                 string? code = Str(expected["code"]);
                 string actualCode = errors[i].Code;
-                Assert.True(code == actualCode || code == "CATALOG_ERROR" && actualCode == A2UIErrorCodes.CatalogError,
-                    $"{label}: error {i} expected {code}, got {actualCode}: {errors[i].Message}");
+                (code == actualCode || code == "CATALOG_ERROR" && actualCode == A2UIErrorCodes.CatalogError).ShouldBeTrue($"{label}: error {i} expected {code}, got {actualCode}: {errors[i].Message}");
                 if (Str(expected["message"]) is { } message)
                 {
-                    Assert.True(errors[i].Message.Contains(message, StringComparison.Ordinal), $"{label}: error {i} expected '{message}' in '{errors[i].Message}'");
+                    errors[i].Message.Contains(message, StringComparison.Ordinal).ShouldBeTrue($"{label}: error {i} expected '{message}' in '{errors[i].Message}'");
                 }
             }
 
-            List<JsonObject> actions = messages.Where(m => m["action"] is JsonObject).Select(m => m["action"]!.AsObject()).ToList();
+            List<JsonObject> actions = messages.Where(m => m["action"] is JsonObject).Select(m => m["action"].Required().AsObject()).ToList();
             JsonArray expectedActions = step["expectActions"] as JsonArray ?? [];
-            Assert.True(expectedActions.Count == actions.Count, $"{label}: expected {expectedActions.Count} actions, got {actions.Count}");
+            actions.Count.ShouldBe(expectedActions.Count, $"{label}: expected {expectedActions.Count} actions, got {actions.Count}");
             for (int i = 0; i < expectedActions.Count; i++)
             {
-                JsonObject expected = expectedActions[i]!.AsObject();
-                Assert.Equal(Str(expected["name"]), Str(actions[i]["name"]));
+                JsonObject expected = expectedActions[i].Required().AsObject();
+                Str(actions[i]["name"]).ShouldBe(Str(expected["name"]));
                 ConformanceAssert.Json(expected["context"] ?? new JsonObject(), actions[i]["context"] ?? new JsonObject(), $"{label}: action {i} context");
                 if (expected.ContainsKey("userMessage"))
                 {
@@ -197,7 +210,7 @@ public class RoutingConformanceTests
 
             if (step["expectValues"] is JsonArray expectedValues)
             {
-                Assert.True(expectedValues.Count == evaluated.Count, $"{label}: expected {expectedValues.Count} values, {evaluated.Count} were evaluated");
+                evaluated.Count.ShouldBe(expectedValues.Count, $"{label}: expected {expectedValues.Count} values, {evaluated.Count} were evaluated");
                 for (int i = 0; i < evaluated.Count; i++)
                 {
                     ConformanceAssert.Json(expectedValues[i], Value(evaluated[i]), $"{label}: value {i}");
@@ -206,17 +219,23 @@ public class RoutingConformanceTests
         }
     }
 
+    /// <summary>
+    /// Returns what a binding shows: its value, or for a check, whether it currently passes.
+    /// </summary>
     private static JsonNode? Value(A2UIBinding binding)
     {
         if (binding.Mode == EvaluationMode.Check)
         {
-            return binding.IsPending || binding.Errors.Count == 0 && A2UIValues.ToValidationResult(binding.Value, null)["valid"]!.GetValue<bool>();
+            return binding.IsPending || binding.Errors.Count == 0 && A2UIValues.ToValidationResult(binding.Value, null)["valid"].Required().GetValue<bool>();
         }
 
         return binding.Value;
     }
 
-    private static async Task Dispatch(MessageProcessor processor, Surface surface, JsonObject action)
+    /// <summary>
+    /// Dispatches an action the way a button would, waiting briefly so the action can send its calls.
+    /// </summary>
+    private static async Task DispatchAsync(MessageProcessor processor, Surface surface, JsonObject action)
     {
         ComponentDefinition definition = new("Button") { Properties = new HashSet<string> { "action" } };
         ComponentInstance component = new(
@@ -233,7 +252,10 @@ public class RoutingConformanceTests
         await Task.WhenAny(task, Task.Delay(50));
     }
 
-    private static async Task Settle(MessageProcessor processor)
+    /// <summary>
+    /// Lets pending callbacks and outbound sends run before the next step.
+    /// </summary>
+    private static async Task SettleAsync(MessageProcessor processor)
     {
         for (int i = 0; i < 5; i++)
         {
@@ -243,12 +265,15 @@ public class RoutingConformanceTests
         }
     }
 
+    /// <summary>
+    /// Builds a catalog from a case's catalog spec: basic functions it names locally, plus agent-side function definitions.
+    /// </summary>
     private static Catalog BuildCatalog(JsonObject spec)
     {
         List<FunctionDefinition> functions = new();
         foreach (JsonNode? local in spec["localFunctions"] as JsonArray ?? [])
         {
-            functions.Add(TestCatalogs.Basic.Functions[local!.GetValue<string>()]);
+            functions.Add(TestCatalogs.Basic.Functions[local.Required().GetValue<string>()]);
         }
 
         foreach ((string fname, JsonNode? declNode) in spec["agentFunctions"] as JsonObject ?? [])
@@ -263,11 +288,17 @@ public class RoutingConformanceTests
             });
         }
 
-        return new Catalog(Str(spec["catalogId"])!, [], functions);
+        return new Catalog(Str(spec["catalogId"]).Required(), [], functions);
     }
 
+    /// <summary>
+    /// Returns a copy of a JSON value with its numbers in the form the parser produces, for comparison.
+    /// </summary>
     private static JsonNode? Normalize(JsonNode? node) => node is null ? null : JsonNode.Parse(node.ToJsonString());
 
+    /// <summary>
+    /// Reads a string value, or null when the node is not a string.
+    /// </summary>
     private static string? Str(JsonNode? node) =>
         node is JsonValue v && v.TryGetValue<string>(out string? s) ? s : null;
 }

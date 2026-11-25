@@ -9,32 +9,60 @@ namespace BlazorA2UI.Data;
 /// </summary>
 public sealed class DataModel
 {
-    /// <summary>Largest list index a write may address.</summary>
+    /// <summary>
+    /// Largest list index a write may address.
+    /// </summary>
     public const int MaxListIndex = 10_000;
 
+    /// <summary>
+    /// The registered path observers, in registration order.
+    /// </summary>
     private readonly List<Observer> _observers = [];
+    /// <summary>
+    /// The model's root value, or null before anything is written.
+    /// </summary>
     private JsonNode? _root;
 
+    /// <summary>
+    /// Creates a data model.
+    /// </summary>
+    /// <param name="initial">The initial root value; a defensive copy is stored. Null starts with an empty model.</param>
     public DataModel(JsonNode? initial = null)
     {
         _root = initial?.DeepClone() ?? new JsonObject();
     }
 
-    /// <summary>Raised after every write that changed the model, with the canonical path written.</summary>
+    /// <summary>
+    /// Raised after every write that changed the model, with the canonical path written.
+    /// </summary>
     public event Action<string>? Changed;
 
-    /// <summary>The root value. Treat as read-only; write with <see cref="Set"/>.</summary>
+    /// <summary>
+    /// The root value. Treat as read-only; write with <see cref="Set"/>.
+    /// </summary>
     public JsonNode? Root => _root;
 
-    /// <summary>Reads the value at <paramref name="path"/>.</summary>
+    /// <summary>
+    /// Reads the value at <paramref name="path"/>.
+    /// </summary>
     /// <returns>True when the path holds a value (which may be JSON null).</returns>
     public bool TryGet(string path, out JsonNode? value) => TryGet(JsonPointer.Parse(path), out value);
 
-    /// <summary>Reads the value at <paramref name="path"/>, or null when absent.</summary>
+    /// <summary>
+    /// Reads the value at <paramref name="path"/>, or null when absent.
+    /// </summary>
     public JsonNode? Get(string path) => TryGet(path, out JsonNode? value) ? value : null;
 
+    /// <summary>
+    /// Reads the value at already-parsed pointer segments.
+    /// </summary>
+    /// <returns>False when the path does not exist; <paramref name="value"/> is then null.</returns>
     internal bool TryGet(IReadOnlyList<string> segments, out JsonNode? value) => TryGet(_root, segments, out value);
 
+    /// <summary>
+    /// Walks <paramref name="segments"/> from <paramref name="start"/>.
+    /// </summary>
+    /// <returns>False when a segment is missing or addresses past the end of a list.</returns>
     private static bool TryGet(JsonNode? start, IReadOnlyList<string> segments, out JsonNode? value)
     {
         JsonNode? current = start;
@@ -98,7 +126,9 @@ public sealed class DataModel
         AfterWrite(segments, existed, oldValue, true, copy);
     }
 
-    /// <summary>Removes the value at <paramref name="path"/>. Missing paths are a no-op.</summary>
+    /// <summary>
+    /// Removes the value at <paramref name="path"/>. Missing paths are a no-op.
+    /// </summary>
     public void Delete(string path)
     {
         IReadOnlyList<string> segments = JsonPointer.Parse(path);
@@ -144,10 +174,14 @@ public sealed class DataModel
         return observer;
     }
 
-    /// <summary>Detaches every observer.</summary>
+    /// <summary>
+    /// Detaches every observer.
+    /// </summary>
     public void DisposeObservers() => _observers.Clear();
 
-    /// <summary>Returns a deep copy of the whole model.</summary>
+    /// <summary>
+    /// Returns a deep copy of the whole model.
+    /// </summary>
     public JsonNode? Snapshot() => _root?.DeepClone();
 
     /// <summary>
@@ -210,6 +244,10 @@ public sealed class DataModel
         }
     }
 
+    /// <summary>
+    /// Creates the missing containers along the path and returns the parent of the last segment. Call <see cref="CheckWritable"/> first, so a failing write never leaves containers behind.
+    /// </summary>
+    /// <exception cref="A2UIDataException">A segment runs into a primitive value, or a non-numeric segment addresses a list.</exception>
     private JsonNode Vivify(IReadOnlyList<string> segments)
     {
         string path = JsonPointer.Format(segments);
@@ -279,6 +317,10 @@ public sealed class DataModel
         return current;
     }
 
+    /// <summary>
+    /// Parses a list index for a write.
+    /// </summary>
+    /// <exception cref="A2UIDataException">The segment is not a list index, or it is larger than <see cref="MaxListIndex"/>.</exception>
     private static int ParseWriteIndex(string segment, string path)
     {
         if (!TryParseIndex(segment, out int index))
@@ -294,6 +336,10 @@ public sealed class DataModel
         return index;
     }
 
+    /// <summary>
+    /// Parses a canonical, non-negative list index (digits only, no leading zeros). A digit string too long for an <see cref="int"/> gives <see cref="int.MaxValue"/>, so it fails the write limit instead of parsing as a key.
+    /// </summary>
+    /// <returns>False when the segment is not such an index.</returns>
     internal static bool TryParseIndex(string segment, out int index)
     {
         index = -1;
@@ -320,6 +366,9 @@ public sealed class DataModel
         return true;
     }
 
+    /// <summary>
+    /// Notifies the observers whose value changed with a write and raises <see cref="Changed"/>. Nothing is raised when the value at the path is unchanged.
+    /// </summary>
     private void AfterWrite(IReadOnlyList<string> segments, bool existed, JsonNode? oldValue, bool exists, JsonNode? newValue)
     {
         if (existed == exists && JsonNode.DeepEquals(oldValue, newValue))
@@ -348,12 +397,24 @@ public sealed class DataModel
         Changed?.Invoke(JsonPointer.Format(segments));
     }
 
+    /// <summary>
+    /// One path subscription made with <see cref="Observe"/>; disposing it unsubscribes.
+    /// </summary>
     private sealed class Observer(DataModel owner, IReadOnlyList<string> segments, Action callback) : IDisposable
     {
+        /// <summary>
+        /// Gets the observed path, as pointer segments.
+        /// </summary>
         public IReadOnlyList<string> Segments { get; } = segments;
 
+        /// <summary>
+        /// Gets the callback to run when the value at the path changes.
+        /// </summary>
         public Action Callback { get; } = callback;
 
+        /// <summary>
+        /// Removes this subscription from its model.
+        /// </summary>
         public void Dispose() => owner._observers.Remove(this);
     }
 }

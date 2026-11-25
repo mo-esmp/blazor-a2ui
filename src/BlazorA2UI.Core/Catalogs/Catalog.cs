@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Nodes;
+using BlazorA2UI.Evaluation;
 using BlazorA2UI.Text;
 
 namespace BlazorA2UI.Catalogs;
@@ -11,12 +12,18 @@ namespace BlazorA2UI.Catalogs;
 /// </summary>
 public sealed class Catalog
 {
+    /// <summary>
+    /// The top-level keys a catalog document may contain; any other key is a catalog error.
+    /// </summary>
     private static readonly HashSet<string> s_allowedRootKeys =
     [
         "$schema", "$id", "protocolVersion", "title", "description", "catalogId", "instructions",
         "metadata", "components", "functions", "$defs",
     ];
 
+    /// <summary>
+    /// The <c>common_types.json</c> definitions a catalog may reference; a reference to anything else is a catalog error.
+    /// </summary>
     private static readonly HashSet<string> s_allowedCommonRefs =
     [
         "ComponentId", "Child", "ChildList", "DynamicString", "DynamicNumber", "DynamicBoolean",
@@ -24,6 +31,17 @@ public sealed class Catalog
         "DataBinding", "FunctionCall",
     ];
 
+    /// <summary>
+    /// Creates a catalog from its components and functions.
+    /// </summary>
+    /// <param name="catalogId">The catalog's id, usually its URL. Must not be empty or whitespace.</param>
+    /// <param name="components">The component types the catalog defines.</param>
+    /// <param name="functions">The functions the catalog defines.</param>
+    /// <param name="protocolVersion">The A2UI protocol version the catalog targets.</param>
+    /// <param name="instructions">Optional instructions for the agent on how to use the catalog.</param>
+    /// <param name="document">The catalog document the catalog was read from, if any; used to resolve local <c>$defs</c> references.</param>
+    /// <exception cref="A2UICatalogException">The id is empty, an entity name is not a UAX #31 identifier, a component is named <c>Surface</c>, or a function that needs user activation may be called by the agent.</exception>
+    /// <exception cref="ArgumentException">Two components or two functions share a name.</exception>
     public Catalog(
         string catalogId,
         IEnumerable<ComponentDefinition> components,
@@ -44,7 +62,7 @@ public sealed class Catalog
         Components = components.ToDictionary(c => c.Name, StringComparer.Ordinal);
         Functions = functions.ToDictionary(f => f.Name, StringComparer.Ordinal);
 
-        foreach (string? name in Components.Keys.Concat(Functions.Keys))
+        foreach (string name in Components.Keys.Concat(Functions.Keys))
         {
             if (!Uax31.IsIdentifier(name))
             {
@@ -67,20 +85,39 @@ public sealed class Catalog
         }
     }
 
+    /// <summary>
+    /// Gets the catalog's id, which messages use in <c>catalogId</c> and <c>@catalogId</c>.
+    /// </summary>
     public string CatalogId { get; }
 
+    /// <summary>
+    /// Gets the A2UI protocol version the catalog targets.
+    /// </summary>
     public string ProtocolVersion { get; }
 
+    /// <summary>
+    /// Gets the catalog's instructions for the agent, or null when it has none.
+    /// </summary>
     public string? Instructions { get; }
 
-    /// <summary>The catalog's JSON document, when it was loaded from one.</summary>
+    /// <summary>
+    /// The catalog's JSON document, when it was loaded from one.
+    /// </summary>
     public JsonObject? Document { get; }
 
+    /// <summary>
+    /// Gets the component types the catalog defines, by type name.
+    /// </summary>
     public IReadOnlyDictionary<string, ComponentDefinition> Components { get; }
 
+    /// <summary>
+    /// Gets the functions the catalog defines, by name.
+    /// </summary>
     public IReadOnlyDictionary<string, FunctionDefinition> Functions { get; }
 
-    /// <summary>Returns a copy of this catalog with the given implementations attached by function name.</summary>
+    /// <summary>
+    /// Returns a copy of this catalog with the given implementations attached by function name.
+    /// </summary>
     public Catalog WithFunctions(IReadOnlyDictionary<string, A2UIFunction> implementations)
     {
         List<FunctionDefinition> functions = Functions.Values.Select(f =>
@@ -96,11 +133,15 @@ public sealed class Catalog
         return new Catalog(CatalogId, Components.Values, functions, ProtocolVersion, Instructions, Document);
     }
 
-    /// <summary>Returns a copy of this catalog under a different id (useful for tests and aliases).</summary>
+    /// <summary>
+    /// Returns a copy of this catalog under a different id (useful for tests and aliases).
+    /// </summary>
     public Catalog WithCatalogId(string catalogId) =>
         new(catalogId, Components.Values, Functions.Values, ProtocolVersion, Instructions, Document);
 
-    /// <summary>Returns a copy of this catalog with extra component types or functions added.</summary>
+    /// <summary>
+    /// Returns a copy of this catalog with extra component types or functions added.
+    /// </summary>
     public Catalog Extend(IEnumerable<ComponentDefinition>? components = null, IEnumerable<FunctionDefinition>? functions = null)
     {
         Dictionary<string, ComponentDefinition> comps = Components.Values.ToDictionary(c => c.Name);
@@ -118,10 +159,16 @@ public sealed class Catalog
         return new Catalog(CatalogId, comps.Values, funcs.Values, ProtocolVersion, Instructions, Document);
     }
 
+    /// <summary>
+    /// Reads a catalog from its JSON text.
+    /// </summary>
+    /// <exception cref="A2UICatalogException">The text is not a valid catalog document.</exception>
     public static Catalog FromJson(string json) =>
         FromJson(JsonNode.Parse(json) as JsonObject ?? throw new A2UICatalogException("A catalog must be a JSON object."));
 
-    /// <summary>Loads a catalog from its JSON Schema document. Functions are schema-only until implementations are attached.</summary>
+    /// <summary>
+    /// Loads a catalog from its JSON Schema document. Functions are schema-only until implementations are attached.
+    /// </summary>
     public static Catalog FromJson(JsonObject document)
     {
         foreach ((string key, JsonNode? _) in document)
@@ -184,6 +231,9 @@ public sealed class Catalog
             (JsonObject)document.DeepClone());
     }
 
+    /// <summary>
+    /// Throws when a <c>$ref</c> anywhere under <paramref name="node"/> points into <c>common_types.json</c> at a definition catalogs may not use.
+    /// </summary>
     private static void CheckRefs(JsonNode? node, string catalogId)
     {
         switch (node)
@@ -222,6 +272,9 @@ public sealed class Catalog
         }
     }
 
+    /// <summary>
+    /// Reads one component definition from its schema: required properties, property schemas, child references, and whether it accepts <c>@checks</c>.
+    /// </summary>
     private static ComponentDefinition ReadComponent(string name, JsonObject schema)
     {
         HashSet<string> properties = new(StringComparer.Ordinal);
@@ -272,7 +325,11 @@ public sealed class Catalog
             {
                 foreach (JsonNode? r2 in req)
                 {
-                    string n = r2!.GetValue<string>();
+                    if (A2UIValues.AsString(r2) is not { } n)
+                    {
+                        continue;
+                    }
+
                     if (n != "component")
                     {
                         required.Add(n);
@@ -280,7 +337,7 @@ public sealed class Catalog
                 }
             }
 
-            foreach (string? combiner in new[] { "allOf", "anyOf", "oneOf" })
+            foreach (string combiner in new[] { "allOf", "anyOf", "oneOf" })
             {
                 if (s[combiner] is JsonArray parts)
                 {
@@ -308,6 +365,11 @@ public sealed class Catalog
         };
     }
 
+    /// <summary>
+    /// Returns how a property refers to child components, or null when it holds no child ids.
+    /// </summary>
+    /// <param name="propSchema">The property's schema.</param>
+    /// <param name="nestedKey">For a list of objects that each hold one child id, the key of that id; otherwise null.</param>
     private static ChildReferenceKind? ChildKind(JsonNode? propSchema, out string? nestedKey)
     {
         nestedKey = null;
@@ -349,10 +411,16 @@ public sealed class Catalog
         return null;
     }
 
+    /// <summary>
+    /// Whether a schema is a reference to a single component id (<c>Child</c> or <c>ComponentId</c>).
+    /// </summary>
     private static bool IsIdReference(JsonObject s) =>
         s["$ref"] is JsonValue r && r.GetValue<string>() is var reference
         && (reference.EndsWith("/Child", StringComparison.Ordinal) || reference.EndsWith("/ComponentId", StringComparison.Ordinal));
 
+    /// <summary>
+    /// Reads an array of strings, or returns null when the node is not an array.
+    /// </summary>
     private static List<string>? ReadStringList(JsonNode? node) =>
-        node is JsonArray arr ? arr.Select(n => n!.GetValue<string>()).ToList() : null;
+        node is JsonArray arr ? arr.Select(A2UIValues.AsString).OfType<string>().ToList() : null;
 }

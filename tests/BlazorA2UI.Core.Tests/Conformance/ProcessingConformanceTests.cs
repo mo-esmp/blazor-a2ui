@@ -4,6 +4,7 @@ using BlazorA2UI.Catalogs;
 using BlazorA2UI.Evaluation;
 using BlazorA2UI.Model;
 using BlazorA2UI.Processing;
+using Shouldly;
 using Xunit;
 
 namespace BlazorA2UI.Tests.Conformance;
@@ -14,8 +15,11 @@ namespace BlazorA2UI.Tests.Conformance;
 /// catalogs from the case, a validation config from <c>strictMode</c> / <c>validationConfig</c>,
 /// errors either thrown or reported on the error channel, and surface state compared afterwards.
 /// </summary>
-public class ProcessingConformanceTests
+public sealed class ProcessingConformanceTests
 {
+    /// <summary>
+    /// The suite files whose processing and validation cases this harness runs.
+    /// </summary>
     private static readonly string[] s_files =
     [
         "message_processor_v1_0.yaml",
@@ -33,8 +37,14 @@ public class ProcessingConformanceTests
         "data_model_pointers.yaml",
     ];
 
+    /// <summary>
+    /// The id of the v0.9 basic catalog, which some suites name and a v1.0 renderer must not offer.
+    /// </summary>
     private const string BasicV09Id = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json";
 
+    /// <summary>
+    /// Gets the v1.0 <c>process_messages</c> and <c>validate</c> cases of every suite file, as theory data.
+    /// </summary>
     public static IEnumerable<object[]> Cases()
     {
         foreach (string file in s_files)
@@ -44,16 +54,22 @@ public class ProcessingConformanceTests
                 string? action = Str(c["action"]);
                 if (action is "process_messages" or "validate" && IsV10(c))
                 {
-                    yield return [file, c["name"]!.GetValue<string>()];
+                    yield return [file, c["name"].Required().GetValue<string>()];
                 }
             }
         }
     }
 
+    /// <summary>
+    /// Proves that processing a case's messages gives the surfaces, errors and outbound messages the suite expects.
+    /// </summary>
+    /// <param name="file">The suite file.</param>
+    /// <param name="name">The case name.</param>
     [Theory]
     [MemberData(nameof(Cases))]
-    public void Process(string file, string name)
+    public void ProcessMessages_ConformanceCase_MatchesSuite(string file, string name)
     {
+        // Arrange
         JsonObject c = ConformanceData.Case(file, name);
         bool isValidate = Str(c["action"]) == "validate";
         HashSet<string> stepCatalogIds = new(StringComparer.Ordinal);
@@ -81,6 +97,8 @@ public class ProcessingConformanceTests
         List<JsonObject> steps = c["steps"] is JsonArray s
             ? s.OfType<JsonObject>().ToList()
             : [c];
+
+        // Act and Assert: each step is processed, then checked against its expectations.
         for (int i = 0; i < steps.Count; i++)
         {
             JsonObject step = steps[i];
@@ -129,25 +147,26 @@ public class ProcessingConformanceTests
                 ConformanceAssert.Error(expectError, first, name);
                 if (expectError["rendererError"] is JsonObject rendererError && Str(rendererError["version"]) == "1.0")
                 {
-                    AssertRendererError(rendererError["error"]!.AsObject(), outbound, name);
+                    AssertRendererError(rendererError["error"].Required().AsObject(), outbound, name);
                 }
 
                 continue;
             }
 
-            Assert.True(
-                thrown is null && errors.Count == 0,
-                $"{name}: unexpected errors: {thrown?.Message} {string.Join("; ", errors.Select(e => e.Code + " " + e.Message))}");
+            (thrown is null && errors.Count == 0).ShouldBeTrue($"{name}: unexpected errors: {thrown?.Message} {string.Join("; ", errors.Select(e => e.Code + " " + e.Message))}");
             if (expect?["surfaces"] is JsonObject surfaces)
             {
                 foreach ((string surfaceId, JsonNode? expected) in surfaces)
                 {
-                    AssertSurface(processor, surfaceId, expected!.AsObject(), name);
+                    AssertSurface(processor, surfaceId, expected.Required().AsObject(), name);
                 }
             }
         }
     }
 
+    /// <summary>
+    /// Reads an <c>expectError</c> value: an object, or a string that is the expected message.
+    /// </summary>
     private static JsonObject? ExpectedError(JsonNode? node) => node switch
     {
         JsonObject o => o,
@@ -157,6 +176,9 @@ public class ProcessingConformanceTests
 
     // ------------------------------------------------------------------ catalogs
 
+    /// <summary>
+    /// Whether a case targets protocol v1.0, from its own version, its catalogs, or its first message.
+    /// </summary>
     private static bool IsV10(JsonObject c)
     {
         string? version = Str(c["protocolVersion"]) ?? Str((c["catalog"] as JsonObject)?["protocolVersion"]);
@@ -174,6 +196,9 @@ public class ProcessingConformanceTests
         return version is "1.0" or "v1.0";
     }
 
+    /// <summary>
+    /// Returns the first message a case sends, looking through steps and nested arrays.
+    /// </summary>
     private static JsonObject? FirstMessage(JsonObject c)
     {
         JsonNode? messages = c["messages"] ?? c["payload"] ?? (c["steps"] as JsonArray)?.OfType<JsonObject>().Select(s => s["messages"] ?? s["payload"]).FirstOrDefault(m => m is not null);
@@ -185,6 +210,9 @@ public class ProcessingConformanceTests
         return messages as JsonObject;
     }
 
+    /// <summary>
+    /// Builds the catalogs a case runs with: the basic catalog, the catalogs it defines inline or by path, and stand-ins for ids it only names. Catalogs that a step adds later are left out.
+    /// </summary>
     private static List<Catalog> BuildCatalogs(JsonObject c, HashSet<string> stepCatalogIds)
     {
         Dictionary<string, Catalog> map = new(StringComparer.Ordinal)
@@ -254,12 +282,18 @@ public class ProcessingConformanceTests
         return map.Values.Distinct().ToList();
     }
 
+    /// <summary>
+    /// Adds a catalog to the map and the set of known ids.
+    /// </summary>
     private static void Add(Dictionary<string, Catalog> map, HashSet<string> known, Catalog catalog)
     {
         map[catalog.CatalogId] = catalog;
         known.Add(catalog.CatalogId);
     }
 
+    /// <summary>
+    /// Returns the catalog ids that the case's <c>createSurface</c> messages name.
+    /// </summary>
     private static IEnumerable<string> CreateSurfaceCatalogIds(JsonObject c)
     {
         Stack<JsonNode?> stack = new();
@@ -299,6 +333,9 @@ public class ProcessingConformanceTests
         }
     }
 
+    /// <summary>
+    /// Builds a catalog from a component-and-function schema, giving it <paramref name="id"/>.
+    /// </summary>
     private static Catalog FromSchema(JsonObject schema, string id)
     {
         JsonObject doc = (JsonObject)schema.DeepClone();
@@ -307,6 +344,9 @@ public class ProcessingConformanceTests
         return Catalog.FromJson(doc);
     }
 
+    /// <summary>
+    /// Builds a catalog from an inline catalog spec, giving it <paramref name="id"/>.
+    /// </summary>
     private static Catalog Inline(JsonObject spec, string id)
     {
         if (spec["components"] is null && spec["functions"] is null)
@@ -315,7 +355,7 @@ public class ProcessingConformanceTests
         }
 
         JsonObject doc = new() { ["catalogId"] = id, ["protocolVersion"] = "1.0" };
-        foreach (string? key in new[] { "$schema", "components", "functions", "$defs" })
+        foreach (string key in new[] { "$schema", "components", "functions", "$defs" })
         {
             if (spec[key] is { } value)
             {
@@ -331,17 +371,24 @@ public class ProcessingConformanceTests
         return Catalog.FromJson(doc);
     }
 
-    /// <summary>A stand-in catalog with the basic components and no functions.</summary>
+    /// <summary>
+    /// A stand-in catalog with the basic components and no functions.
+    /// </summary>
     private static Catalog ComponentsOnly(string id) =>
         new(id, TestCatalogs.Basic.Components.Values, [], "1.0");
 
+    /// <summary>
+    /// Loads catalogs from vendored paths.
+    /// </summary>
+    /// <param name="paths">The paths, relative to the suite.</param>
+    /// <param name="skipped">The paths that were left out, such as v0.9 catalogs.</param>
     private static List<Catalog> LoadPaths(JsonArray? paths, out List<string> skipped)
     {
         skipped = [];
         List<Catalog> catalogs = new();
         foreach (JsonNode? p in paths ?? [])
         {
-            string path = p!.GetValue<string>();
+            string path = p.Required().GetValue<string>();
             if (path.Contains("basic/v1/", StringComparison.Ordinal) || path == TestCatalogs.Basic.CatalogId)
             {
                 catalogs.Add(TestCatalogs.Basic);
@@ -362,6 +409,9 @@ public class ProcessingConformanceTests
 
     // ------------------------------------------------------------------ validation config
 
+    /// <summary>
+    /// Returns the validation config a case runs with: its explicit flags, strict or relaxed for <c>validate</c> cases, strict when <c>strictMode</c> is set, otherwise null for a streaming renderer.
+    /// </summary>
     private static A2UIValidationConfig? CaseValidation(JsonObject c, bool isValidate)
     {
         if (c["validationConfig"] is JsonObject flags)
@@ -380,6 +430,9 @@ public class ProcessingConformanceTests
         return isStrict ? A2UIValidationConfig.Strict : null;
     }
 
+    /// <summary>
+    /// Builds a validation config from a case's <c>validationConfig</c> flags.
+    /// </summary>
     private static A2UIValidationConfig FromFlags(JsonObject flags) => new()
     {
         AllowOrphanComponents = Flag(flags, "allowOrphanComponents"),
@@ -388,22 +441,28 @@ public class ProcessingConformanceTests
         AllowUnknownElements = Flag(flags, "allowUnknownElements"),
     };
 
+    /// <summary>
+    /// Reads one validation flag; a missing flag is false.
+    /// </summary>
     private static bool Flag(JsonObject flags, string name) =>
         flags[name] is JsonValue v && v.GetValueKind() == JsonValueKind.True;
 
     // ------------------------------------------------------------------ assertions
 
+    /// <summary>
+    /// Asserts that an error message the processor sent to the agent has the expected code, message and fields.
+    /// </summary>
     private static void AssertRendererError(JsonObject expected, List<JsonObject> outbound, string name)
     {
         JsonObject? error = outbound.Select(m => m["error"] as JsonObject).LastOrDefault(e => e is not null);
-        Assert.True(error is not null, $"{name}: expected an outbound error message");
-        Assert.Equal(Str(expected["code"]), Str(error!["code"]));
+        error.ShouldNotBeNull($"{name}: expected an outbound error message");
+        Str(error["code"]).ShouldBe(Str(expected["code"]));
         if (Str(expected["message"]) is { } message)
         {
-            Assert.True(ConformanceAssert.MessageMatches(message, Str(error["message"]) ?? string.Empty), $"{name}: error.message expected '{message}', got '{Str(error["message"])}'");
+            ConformanceAssert.MessageMatches(message, Str(error["message"]) ?? string.Empty).ShouldBeTrue($"{name}: error.message expected '{message}', got '{Str(error["message"])}'");
         }
 
-        foreach (string? key in new[] { "surfaceId", "functionCallId", "path" })
+        foreach (string key in new[] { "surfaceId", "functionCallId", "path" })
         {
             if (Str(expected[key]) is { } value)
             {
@@ -412,29 +471,32 @@ public class ProcessingConformanceTests
                 // property rather than at the component.
                 bool missingField = key == "path" && actual is not null && actual.StartsWith(value + "/", StringComparison.Ordinal)
                                    && (Str(error["message"]) ?? string.Empty).Contains($"requires '{actual[(value.Length + 1)..]}'", StringComparison.Ordinal);
-                Assert.True(value == actual || missingField, $"{name}: error.{key} expected '{value}', got '{actual}'");
+                (value == actual || missingField).ShouldBeTrue($"{name}: error.{key} expected '{value}', got '{actual}'");
             }
         }
     }
 
+    /// <summary>
+    /// Asserts a surface's state: whether it exists, its settings, data model, components and validation results.
+    /// </summary>
     private static void AssertSurface(MessageProcessor processor, string surfaceId, JsonObject expected, string name)
     {
         processor.Surfaces.TryGetValue(surfaceId, out Surface? surface);
         if (expected["exists"] is JsonValue ev && ev.GetValueKind() == JsonValueKind.False)
         {
-            Assert.True(surface is null, $"{name}: surface '{surfaceId}' should not exist");
+            surface.ShouldBeNull($"{name}: surface '{surfaceId}' should not exist");
             return;
         }
 
-        Assert.True(surface is not null, $"{name}: surface '{surfaceId}' does not exist");
+        surface.ShouldNotBeNull($"{name}: surface '{surfaceId}' does not exist");
         if (expected["sendDataModel"] is JsonValue sdm)
         {
-            Assert.Equal(sdm.GetValue<bool>(), surface!.SendDataModel);
+            surface.SendDataModel.ShouldBe(sdm.GetValue<bool>());
         }
 
         if (expected.ContainsKey("metadata"))
         {
-            ConformanceAssert.Json(expected["metadata"], surface!.Metadata, $"{name}: metadata");
+            ConformanceAssert.Json(expected["metadata"], surface.Metadata, $"{name}: metadata");
         }
 
         if (expected.ContainsKey("theme"))
@@ -444,32 +506,32 @@ public class ProcessingConformanceTests
 
         if (expected.ContainsKey("dataModel"))
         {
-            ConformanceAssert.Json(expected["dataModel"], surface!.DataModel.Root, $"{name}: dataModel");
+            ConformanceAssert.Json(expected["dataModel"], surface.DataModel.Root, $"{name}: dataModel");
         }
 
-        Dictionary<string, RenderedNode> rendered = RenderAll(surface!);
+        Dictionary<string, RenderedNode> rendered = RenderAll(surface);
         if (expected["components"] is { } components)
         {
             List<(string Id, JsonObject? Expected)> items = components switch
             {
                 JsonObject map => map.Select(p => (Id: p.Key, Expected: p.Value as JsonObject)).ToList(),
-                JsonArray list => list.OfType<JsonObject>().Select(o => (Id: Str(o["id"])!, Expected: (JsonObject?)o)).ToList(),
+                JsonArray list => list.OfType<JsonObject>().Select(o => (Id: Str(o["id"]).Required(), Expected: (JsonObject?)o)).ToList(),
                 _ => [],
             };
             foreach ((string id, JsonObject? componentExpected) in items)
             {
-                bool hasRaw = surface!.Components.TryGetValue(id, out ComponentInstance? raw);
+                bool hasRaw = surface.Components.TryGetValue(id, out ComponentInstance? raw);
                 rendered.TryGetValue(id, out RenderedNode? node);
-                Assert.True(hasRaw || node is not null, $"{name}: component '{id}' missing");
+                (hasRaw || node is not null).ShouldBeTrue($"{name}: component '{id}' missing");
                 if (componentExpected is null)
                 {
                     continue;
                 }
 
-                ComponentInstance component = node?.Component ?? raw!;
+                ComponentInstance component = node?.Component ?? raw.Required();
                 if (Str(componentExpected["component"]) is { } type)
                 {
-                    Assert.Equal(type, component.Type);
+                    component.Type.ShouldBe(type);
                 }
 
                 if (componentExpected["@metadata"] is { } metadata)
@@ -490,18 +552,25 @@ public class ProcessingConformanceTests
                 }
             }
 
-            if (components is JsonArray && items.All(i => surface!.Components.ContainsKey(i.Id)))
+            if (components is JsonArray && items.All(i => surface.Components.ContainsKey(i.Id)))
             {
-                Assert.True(items.Count == surface!.Components.Count, $"{name}: expected {items.Count} components, got {surface.Components.Count}");
+                surface.Components.Count.ShouldBe(items.Count, $"{name}: expected {items.Count} components, got {surface.Components.Count}");
             }
         }
 
-        ConformanceAssert.ValidationFields(expected, surface!, rendered, name);
+        ConformanceAssert.ValidationFields(expected, surface, rendered, name);
     }
 
+    /// <summary>
+    /// A component as a renderer would draw it, with the data context it was drawn in.
+    /// </summary>
+    /// <param name="Component">The component.</param>
+    /// <param name="Context">The data context, which is a template item's scope inside lists.</param>
     internal sealed record RenderedNode(Model.ComponentInstance Component, EvaluationContext Context);
 
-    /// <summary>Walks the tree from the root, evaluating every property like a renderer would.</summary>
+    /// <summary>
+    /// Walks the tree from the root, evaluating every property like a renderer would.
+    /// </summary>
     internal static Dictionary<string, RenderedNode> RenderAll(Surface surface)
     {
         Dictionary<string, RenderedNode> rendered = new(StringComparer.Ordinal);
@@ -559,6 +628,9 @@ public class ProcessingConformanceTests
         return rendered;
     }
 
+    /// <summary>
+    /// Reads a string value, or null when the node is not a string.
+    /// </summary>
     private static string? Str(JsonNode? node) =>
         node is JsonValue v && v.TryGetValue<string>(out string? s) ? s : null;
 }

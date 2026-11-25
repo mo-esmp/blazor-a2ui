@@ -106,8 +106,11 @@ Follow `.editorconfig`. These rules add to it:
   `Set_IndexAboveLimit_LeavesModelUnchanged`.
 * Protocol behavior is tested against the language-independent A2UI conformance suites in
   `tests/BlazorA2UI.Core.Tests/Conformance/data`, which are vendored from the A2UI repository. A data-driven conformance
-  theory is named after its suite (`Expressions_Case_MatchesSuite`). Every case runs, and a case may be skipped only
-  with a comment that cites the conformance README rule allowing it.
+  theory follows the same pattern, with the method it exercises and `ConformanceCase_MatchesSuite`
+  (`Parse_ConformanceCase_MatchesSuite`). Every case runs, and a case may be skipped only with a comment that cites the
+  conformance README rule allowing it. Missing fields in a case fail through `FixtureGuard.Required()`, not `!`.
+* Test files mirror the source folders (`tests/BlazorA2UI.Core.Tests/Data/DataModelTests.cs` tests
+  `src/BlazorA2UI.Core/Data/DataModel.cs`), and test classes are `sealed`.
 * Behavior that the suites don't cover, including every safety rule and every fixed bug, gets a regular unit test.
 * Unit tests use no network, sockets, browser or real agent.
 

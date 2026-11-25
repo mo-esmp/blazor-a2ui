@@ -13,12 +13,19 @@ namespace BlazorA2UI.Processing;
 /// </param>
 public sealed record A2UIOutboundMessage(JsonObject Message, JsonObject? Metadata)
 {
-    /// <summary>The message kind: the envelope's single non-version key.</summary>
+    /// <summary>
+    /// The message kind: the envelope's single non-version key.
+    /// </summary>
     public string Kind => Message.Select(p => p.Key).First(k => k != "version");
 
-    /// <summary>The message body under <see cref="Kind"/>.</summary>
+    /// <summary>
+    /// The message body under <see cref="Kind"/>.
+    /// </summary>
+    // The processor builds every outbound message with an object body under its kind.
     public JsonObject Body => (JsonObject)Message[Kind]!;
 }
 
-/// <summary>An error the renderer reported (and sent to the agent when an outbound channel exists).</summary>
+/// <summary>
+/// An error the renderer reported (and sent to the agent when an outbound channel exists).
+/// </summary>
 public sealed record A2UIErrorReport(string Code, string Message, string? SurfaceId, string? FunctionCallId, string? Path);

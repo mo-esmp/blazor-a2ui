@@ -1,35 +1,57 @@
 ﻿namespace BlazorA2UI.Evaluation;
 
-/// <summary>Why an expression is being evaluated, which decides what it may call.</summary>
+/// <summary>
+/// Why an expression is being evaluated, which decides what it may call.
+/// </summary>
 public enum EvaluationMode
 {
-    /// <summary>A component property binding (reactive, no user activation).</summary>
+    /// <summary>
+    /// A component property binding (reactive, no user activation).
+    /// </summary>
     Binding,
 
-    /// <summary>A <c>CheckRule.condition</c> (reactive, no user activation).</summary>
+    /// <summary>
+    /// A <c>CheckRule.condition</c> (reactive, no user activation).
+    /// </summary>
     Check,
 
-    /// <summary>An action triggered by a user gesture (imperative, user-activated).</summary>
+    /// <summary>
+    /// An action triggered by a user gesture (imperative, user-activated).
+    /// </summary>
     Action,
 
-    /// <summary>An agent-initiated <c>callRendererFunction</c>.</summary>
+    /// <summary>
+    /// An agent-initiated <c>callRendererFunction</c>.
+    /// </summary>
     AgentCall,
 }
 
-/// <summary>Per-evaluation settings and results.</summary>
+/// <summary>
+/// Per-evaluation settings and results.
+/// </summary>
 public sealed class EvaluationScope
 {
+    /// <summary>
+    /// Creates a scope for one evaluation in <paramref name="mode"/>.
+    /// </summary>
     public EvaluationScope(EvaluationMode mode)
     {
         Mode = mode;
     }
 
+    /// <summary>
+    /// Gets what the evaluation is for, which decides the call boundaries it enforces.
+    /// </summary>
     public EvaluationMode Mode { get; }
 
-    /// <summary>True when the evaluation runs from a user gesture.</summary>
+    /// <summary>
+    /// True when the evaluation runs from a user gesture.
+    /// </summary>
     public bool UserActivated => Mode == EvaluationMode.Action;
 
-    /// <summary>True for bindings and checks, whose remote calls are shared and cached.</summary>
+    /// <summary>
+    /// True for bindings and checks, whose remote calls are shared and cached.
+    /// </summary>
     public bool IsReactive => Mode is EvaluationMode.Binding or EvaluationMode.Check;
 
     /// <summary>
@@ -38,10 +60,14 @@ public sealed class EvaluationScope
     /// </summary>
     public string? CatalogOverride { get; internal set; }
 
-    /// <summary>Set when some part of the value waits on an asynchronous call.</summary>
+    /// <summary>
+    /// Set when some part of the value waits on an asynchronous call.
+    /// </summary>
     public bool Pending { get; internal set; }
 
-    /// <summary>True while evaluating the parts of a <c>formatString</c> template, which never route to the agent.</summary>
+    /// <summary>
+    /// True while evaluating the parts of a <c>formatString</c> template, which never route to the agent.
+    /// </summary>
     public bool InTemplate { get; internal set; }
 
     /// <summary>
@@ -56,7 +82,13 @@ public sealed class EvaluationScope
     /// </summary>
     public ISet<string>? RequestedAgentCalls { get; init; }
 
+    /// <summary>
+    /// Gets or sets the current call nesting depth, used to stop runaway recursion.
+    /// </summary>
     internal int Depth { get; set; }
 
+    /// <summary>
+    /// Gets the token that cancels the evaluation and any agent call it starts.
+    /// </summary>
     public CancellationToken CancellationToken { get; init; }
 }

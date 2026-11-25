@@ -14,23 +14,39 @@ namespace BlazorA2UI.Catalogs;
 /// </summary>
 internal static class SchemaCheck
 {
+    /// <summary>
+    /// The file name that references into the shared common types use.
+    /// </summary>
     private const string CommonTypesName = "common_types.json";
+    /// <summary>
+    /// The deepest nesting of value and schema the check walks before giving up.
+    /// </summary>
     private const int MaxDepth = 64;
 
+    /// <summary>
+    /// The embedded <c>common_types.json</c> schema, parsed once on first use.
+    /// </summary>
     private static readonly Lazy<JsonObject> s_commonTypes = new(() =>
     {
         using Stream stream = typeof(SchemaCheck).Assembly.GetManifestResourceStream("BlazorA2UI.Schemas.common_types.json")
                            ?? throw new InvalidOperationException("The embedded common_types.json schema is missing.");
+        // The embedded schema is a JSON object, so Parse never returns null for it.
         return (JsonObject)JsonNode.Parse(stream)!;
     });
 
-    /// <summary>Returns the first problem, or null when the value fits the schema.</summary>
+    /// <summary>
+    /// Returns the first problem, or null when the value fits the schema.
+    /// </summary>
     /// <param name="value">The property value as the agent sent it.</param>
     /// <param name="schema">The property's schema.</param>
     /// <param name="catalogDocument">The catalog document, for local <c>#/$defs/...</c> references.</param>
     public static string? Validate(JsonNode? value, JsonNode? schema, JsonObject? catalogDocument) =>
         Check(value, schema, catalogDocument ?? new JsonObject(), 0);
 
+    /// <summary>
+    /// Checks a value against one schema node.
+    /// </summary>
+    /// <returns>The first problem found, or null when the value fits.</returns>
     private static string? Check(JsonNode? value, JsonNode? schemaNode, JsonObject document, int depth)
     {
         if (depth > MaxDepth)
@@ -133,7 +149,7 @@ internal static class SchemaCheck
             }
         }
 
-        foreach (string? combiner in new[] { "anyOf", "oneOf" })
+        foreach (string combiner in new[] { "anyOf", "oneOf" })
         {
             if (schema[combiner] is JsonArray branches && branches.Count > 0)
             {
@@ -177,6 +193,10 @@ internal static class SchemaCheck
         return null;
     }
 
+    /// <summary>
+    /// Checks an object's required keys, declared properties and additional keys.
+    /// </summary>
+    /// <returns>The first problem found, or null.</returns>
     private static string? ObjectProblem(JsonObject obj, JsonObject schema, JsonObject document, int depth)
     {
         JsonObject? props = schema["properties"] as JsonObject;
@@ -231,7 +251,9 @@ internal static class SchemaCheck
         return null;
     }
 
-    /// <summary>Keys declared by a schema and the parts it combines (for <c>unevaluatedProperties</c>).</summary>
+    /// <summary>
+    /// Keys declared by a schema and the parts it combines (for <c>unevaluatedProperties</c>).
+    /// </summary>
     private static HashSet<string> DeclaredKeys(JsonObject schema, JsonObject document, int depth)
     {
         HashSet<string> keys = new(StringComparer.Ordinal);
@@ -251,7 +273,7 @@ internal static class SchemaCheck
             keys.UnionWith(DeclaredKeys(targetSchema, targetDocument, depth + 1));
         }
 
-        foreach (string? combiner in new[] { "allOf", "anyOf", "oneOf" })
+        foreach (string combiner in new[] { "allOf", "anyOf", "oneOf" })
         {
             foreach (JsonObject part in (schema[combiner] as JsonArray ?? []).OfType<JsonObject>())
             {
@@ -262,6 +284,10 @@ internal static class SchemaCheck
         return keys;
     }
 
+    /// <summary>
+    /// Checks an array's length limits and each item.
+    /// </summary>
+    /// <returns>The first problem found, or null.</returns>
     private static string? ArrayProblem(JsonArray arr, JsonObject schema, JsonObject document, int depth)
     {
         if (A2UIValues.ToDouble(schema["minItems"]) is { } minItems && arr.Count < minItems)
@@ -288,6 +314,10 @@ internal static class SchemaCheck
         return null;
     }
 
+    /// <summary>
+    /// Resolves a <c>$ref</c> into <c>common_types.json</c> or the current document.
+    /// </summary>
+    /// <returns>False when the reference points into another document or to a missing definition; the reference is then not enforced.</returns>
     private static bool Resolve(string reference, JsonObject document, out JsonNode? target, out JsonObject targetDocument)
     {
         target = null;
@@ -318,9 +348,12 @@ internal static class SchemaCheck
         return true;
     }
 
+    /// <summary>
+    /// Whether a value has the JSON Schema type (or one of the types) given.
+    /// </summary>
     private static bool TypeMatches(JsonNode? value, JsonNode type) => type switch
     {
-        JsonArray types => types.Any(t => TypeMatches(value, t!)),
+        JsonArray types => types.Any(t => t is not null && TypeMatches(value, t)),
         JsonValue t when t.TryGetValue<string>(out string? name) => name switch
         {
             "string" => value is JsonValue v && v.GetValueKind() == JsonValueKind.String,
@@ -335,6 +368,9 @@ internal static class SchemaCheck
         _ => true,
     };
 
+    /// <summary>
+    /// Whether a string matches a schema <c>pattern</c>. Identifier patterns use the UAX #31 check; a pattern .NET cannot compile is not enforced, and a match that times out fails.
+    /// </summary>
     private static bool PatternMatches(string pattern, string value)
     {
         if (pattern.Contains(@"\p{XID_Start}", StringComparison.Ordinal))
@@ -356,9 +392,15 @@ internal static class SchemaCheck
         }
     }
 
+    /// <summary>
+    /// Describes a schema type for an error message.
+    /// </summary>
     private static string DescribeType(JsonNode type) =>
         type is JsonArray a ? string.Join(" or ", a.Select(t => t?.ToString())) : $"{type}";
 
+    /// <summary>
+    /// Describes a value's kind for an error message.
+    /// </summary>
     private static string Describe(JsonNode? value) => value switch
     {
         null => "null",

@@ -10,8 +10,14 @@ namespace BlazorA2UI.Tests.Conformance;
 /// </summary>
 internal static class ConformanceData
 {
+    /// <summary>
+    /// Parsed suite files, by file name.
+    /// </summary>
     private static readonly Dictionary<string, List<JsonObject>> s_cache = new();
 
+    /// <summary>
+    /// Loads every case of a vendored suite file, parsing it once.
+    /// </summary>
     public static IReadOnlyList<JsonObject> Load(string file)
     {
         lock (s_cache)
@@ -28,19 +34,29 @@ internal static class ConformanceData
                 yaml.Load(reader);
             }
 
-            JsonArray root = (JsonArray)ToJson(yaml.Documents[0].RootNode)!;
+            JsonArray root = (JsonArray)ToJson(yaml.Documents[0].RootNode).Required();
             List<JsonObject> cases = root.OfType<JsonObject>().ToList();
             s_cache[file] = cases;
             return cases;
         }
     }
 
+    /// <summary>
+    /// Returns the case named <paramref name="name"/> from a suite file.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The file has no case, or more than one, with that name.</exception>
     public static JsonObject Case(string file, string name) =>
-        Load(file).Single(c => c["name"]!.GetValue<string>() == name);
+        Load(file).Single(c => c["name"].Required().GetValue<string>() == name);
 
+    /// <summary>
+    /// Returns the names of the cases that pass <paramref name="filter"/>, as theory data.
+    /// </summary>
     public static IEnumerable<object[]> Names(string file, Func<JsonObject, bool> filter) =>
-        Load(file).Where(filter).Select(c => new object[] { c["name"]!.GetValue<string>() });
+        Load(file).Where(filter).Select(c => new object[] { c["name"].Required().GetValue<string>() });
 
+    /// <summary>
+    /// Converts a YAML node into JSON, reading plain scalars as numbers, booleans, null or strings the way YAML 1.2 does.
+    /// </summary>
     private static JsonNode? ToJson(YamlNode node)
     {
         switch (node)
@@ -50,7 +66,7 @@ internal static class ConformanceData
                     JsonObject obj = new();
                     foreach ((YamlNode? key, YamlNode? value) in map.Children)
                     {
-                        obj[((YamlScalarNode)key).Value!] = ToJson(value);
+                        obj[((YamlScalarNode)key).Value.Required()] = ToJson(value);
                     }
 
                     return obj;

@@ -33,7 +33,7 @@ def is_continue(cp):
 def emit(name, rs):
     flat = [x for pair in rs for x in pair]
     lines = ["        " + ", ".join("0x%X" % v for v in flat[i:i + 8]) + "," for i in range(0, len(flat), 8)]
-    return (f"    /// <summary>Inclusive start/end pairs, sorted.</summary>\n"
+    return (f"    /// <summary>\n    /// Inclusive start/end pairs, sorted.\n    /// </summary>\n"
             f"    internal static readonly int[] s_{name[0].lower() + name[1:]} =\n    [\n" + "\n".join(lines) + "\n    ];\n")
 
 

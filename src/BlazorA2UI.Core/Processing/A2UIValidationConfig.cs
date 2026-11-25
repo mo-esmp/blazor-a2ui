@@ -7,10 +7,14 @@
 /// </summary>
 public sealed record A2UIValidationConfig
 {
-    /// <summary>Every rule enforced: a root must exist, every reference must resolve, nothing may be unreachable, and every function must be declared.</summary>
+    /// <summary>
+    /// Every rule enforced: a root must exist, every reference must resolve, nothing may be unreachable, and every function must be declared.
+    /// </summary>
     public static A2UIValidationConfig Strict { get; } = new();
 
-    /// <summary>Every rule relaxed.</summary>
+    /// <summary>
+    /// Every rule relaxed.
+    /// </summary>
     public static A2UIValidationConfig Relaxed { get; } = new()
     {
         AllowOrphanComponents = true,
@@ -19,13 +23,19 @@ public sealed record A2UIValidationConfig
         AllowUnknownElements = true,
     };
 
-    /// <summary>Allow components that are not reachable from <c>root</c>.</summary>
+    /// <summary>
+    /// Allow components that are not reachable from <c>root</c>.
+    /// </summary>
     public bool AllowOrphanComponents { get; init; }
 
-    /// <summary>Allow child references to components that do not exist (yet).</summary>
+    /// <summary>
+    /// Allow child references to components that do not exist (yet).
+    /// </summary>
     public bool AllowDanglingReferences { get; init; }
 
-    /// <summary>Allow a surface without a <c>root</c> component.</summary>
+    /// <summary>
+    /// Allow a surface without a <c>root</c> component.
+    /// </summary>
     public bool AllowMissingRoot { get; init; }
 
     /// <summary>

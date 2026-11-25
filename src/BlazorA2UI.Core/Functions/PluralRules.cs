@@ -2,9 +2,14 @@
 
 namespace BlazorA2UI.Functions;
 
-/// <summary>CLDR cardinal plural categories for the languages most UIs ship in.</summary>
+/// <summary>
+/// CLDR cardinal plural categories for the languages most UIs ship in.
+/// </summary>
 internal static class PluralRules
 {
+    /// <summary>
+    /// Returns the CLDR cardinal category (<c>zero</c>, <c>one</c>, <c>two</c>, <c>few</c>, <c>many</c> or <c>other</c>) of <paramref name="n"/> in the culture's language; languages without rules here use the English rules.
+    /// </summary>
     public static string Category(double n, CultureInfo culture)
     {
         string lang = culture.TwoLetterISOLanguageName;

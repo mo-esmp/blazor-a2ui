@@ -1,6 +1,8 @@
 ﻿namespace BlazorA2UI.Functions;
 
-/// <summary>URL checks shared by <c>openUrl</c> and the media components.</summary>
+/// <summary>
+/// URL checks shared by <c>openUrl</c> and the media components.
+/// </summary>
 public static class UrlSafety
 {
     /// <summary>
@@ -70,6 +72,9 @@ public static class UrlSafety
         return Uri.TryCreate(trimmed, UriKind.Absolute, out Uri? uri) && !string.IsNullOrEmpty(uri.Host) ? trimmed : null;
     }
 
+    /// <summary>
+    /// Trims leading and trailing control characters and spaces, and removes tabs and line breaks, the way browsers do before parsing a URL.
+    /// </summary>
     private static string Clean(string? url)
     {
         if (string.IsNullOrEmpty(url))
@@ -83,6 +88,9 @@ public static class UrlSafety
         return trimmed.Replace("\t", string.Empty).Replace("\n", string.Empty).Replace("\r", string.Empty);
     }
 
+    /// <summary>
+    /// Whether a URL has an authority (<c>scheme://host</c>), rejecting forms like <c>scheme:///</c>.
+    /// </summary>
     private static bool HasAuthority(string url)
     {
         int colon = url.IndexOf(':');
@@ -90,6 +98,9 @@ public static class UrlSafety
         return rest.Length > 2 && rest[0] == '/' && rest[1] == '/' && rest[2] is not ('/' or '\\');
     }
 
+    /// <summary>
+    /// Whether a URL is a relative reference on the same host: no scheme and not protocol-relative (<c>//host</c>).
+    /// </summary>
     private static bool IsRelativeSameHost(string url)
     {
         int colon = url.IndexOf(':');

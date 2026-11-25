@@ -7,7 +7,9 @@ namespace BlazorA2UI.Text;
 
 internal static class Uax31Tables
 {
-    /// <summary>Inclusive start/end pairs, sorted.</summary>
+    /// <summary>
+    /// Inclusive start/end pairs, sorted.
+    /// </summary>
     internal static readonly int[] s_xidStart =
     [
         0x41, 0x5A, 0x61, 0x7A, 0xAA, 0xAA, 0xB5, 0xB5,
@@ -179,7 +181,9 @@ internal static class Uax31Tables
         0x2F800, 0x2FA1D, 0x30000, 0x3134A, 0x31350, 0x323AF,
     ];
 
-    /// <summary>Inclusive start/end pairs, sorted.</summary>
+    /// <summary>
+    /// Inclusive start/end pairs, sorted.
+    /// </summary>
     internal static readonly int[] s_xidContinue =
     [
         0x30, 0x39, 0x41, 0x5A, 0x5F, 0x5F, 0x61, 0x7A,

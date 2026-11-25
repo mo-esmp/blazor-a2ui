@@ -17,13 +17,24 @@ namespace BlazorA2UI.Expressions;
 /// Parsed parts are returned as JSON: a string for literal text, <c>{"@path": ...}</c>
 /// for a data binding, and <c>{"@call": ..., "args": {...}}</c> for a function call.
 /// </remarks>
-public static class ExpressionParser
+internal static class ExpressionParser
 {
+    /// <summary>
+    /// The deepest nesting of calls and interpolations a template may have.
+    /// </summary>
     public const int MaxDepth = 100;
+    /// <summary>
+    /// The longest template accepted, in UTF-16 code units.
+    /// </summary>
     public const int MaxTemplateLength = 10_000;
+    /// <summary>
+    /// The most parts (literal runs and expressions) a template may produce.
+    /// </summary>
     public const int MaxParts = 1_000;
 
-    /// <summary>Parses a template string into its parts.</summary>
+    /// <summary>
+    /// Parses a template string into its parts.
+    /// </summary>
     public static List<JsonNode?> Parse(string input, int depth = 0)
     {
         if (depth > MaxDepth)
@@ -89,6 +100,9 @@ public static class ExpressionParser
         return parts;
     }
 
+    /// <summary>
+    /// Moves the pending literal text into <paramref name="parts"/>, if there is any.
+    /// </summary>
     private static void Flush(List<JsonNode?> parts, StringBuilder literal)
     {
         if (literal.Length > 0)
@@ -98,6 +112,10 @@ public static class ExpressionParser
         }
     }
 
+    /// <summary>
+    /// Reads the text of a <c>${...}</c> interpolation up to its matching closing brace, skipping braces inside string literals.
+    /// </summary>
+    /// <exception cref="A2UIExpressionException">The interpolation is not closed.</exception>
     private static string ExtractInterpolationContent(Scanner scanner)
     {
         int start = scanner.Pos;
@@ -138,7 +156,9 @@ public static class ExpressionParser
         return scanner.Input.Substring(start, scanner.Pos - 1 - start);
     }
 
-    /// <summary>Parses the content of one <c>${...}</c> block.</summary>
+    /// <summary>
+    /// Parses the content of one <c>${...}</c> block.
+    /// </summary>
     public static JsonNode? ParseExpression(string expr, int depth = 0)
     {
         expr = expr.Trim();
@@ -158,6 +178,10 @@ public static class ExpressionParser
         return result;
     }
 
+    /// <summary>
+    /// Parses one expression: a literal, a path, a keyword or a function call.
+    /// </summary>
+    /// <exception cref="A2UIExpressionException">The expression is malformed or nested deeper than <see cref="MaxDepth"/>.</exception>
     private static JsonNode? ParseExpressionInternal(Scanner scanner, int depth)
     {
         if (depth > MaxDepth)
@@ -223,6 +247,9 @@ public static class ExpressionParser
         return new JsonObject { ["@path"] = token };
     }
 
+    /// <summary>
+    /// Reads a data path or a function name at the scanner's position.
+    /// </summary>
     private static string ScanPathOrIdentifier(Scanner scanner)
     {
         int start = scanner.Pos;
@@ -267,6 +294,10 @@ public static class ExpressionParser
         return scanner.Input[start..scanner.Pos];
     }
 
+    /// <summary>
+    /// Parses the argument list of a call to <paramref name="name"/>.
+    /// </summary>
+    /// <exception cref="A2UIExpressionException">The argument list is malformed.</exception>
     private static JsonObject ParseFunctionCall(string name, Scanner scanner, int depth)
     {
         scanner.Advance(); // (
@@ -307,6 +338,10 @@ public static class ExpressionParser
         return new JsonObject { ["@call"] = name, ["args"] = args };
     }
 
+    /// <summary>
+    /// Parses a quoted string literal, unescaping it.
+    /// </summary>
+    /// <exception cref="A2UIExpressionException">The literal is not closed.</exception>
     private static string ParseStringLiteral(Scanner scanner)
     {
         string quote = scanner.Advance();
@@ -337,6 +372,9 @@ public static class ExpressionParser
         throw new A2UIExpressionException($"Unclosed string literal: missing closing {quote}");
     }
 
+    /// <summary>
+    /// Whether a number literal starts at the scanner's position.
+    /// </summary>
     private static bool IsNumberStart(Scanner scanner)
     {
         int offset = scanner.Peek() is "-" or "+" ? 1 : 0;
@@ -348,9 +386,16 @@ public static class ExpressionParser
         return scanner.Peek(offset) == "." && IsDigit(scanner.Peek(offset + 1));
     }
 
+    /// <summary>
+    /// The full syntax of a number literal.
+    /// </summary>
     private static readonly System.Text.RegularExpressions.Regex s_numberLiteral =
         new(@"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
+    /// <summary>
+    /// Parses a number literal.
+    /// </summary>
+    /// <exception cref="A2UIExpressionException">The literal is malformed.</exception>
     private static JsonNode ParseNumberLiteral(Scanner scanner)
     {
         int start = scanner.Pos;
@@ -393,20 +438,41 @@ public static class ExpressionParser
         return JsonValue.Create(value == 0 ? 0d : value);
     }
 
+    /// <summary>
+    /// Whether a scanned code point is an ASCII digit.
+    /// </summary>
     private static bool IsDigit(string c) => c.Length == 1 && char.IsAsciiDigit(c[0]);
 
+    /// <summary>
+    /// Whether a scanned code point can continue a UAX #31 identifier, so a keyword followed by one is not a keyword.
+    /// </summary>
     private static bool IsIdContinue(string c) =>
         c.Length > 0 && Rune.TryGetRuneAt(c, 0, out Rune rune) && rune.Utf16SequenceLength == c.Length && Uax31.IsXidContinue(rune);
 
+    /// <summary>
+    /// Reads a template code point by code point.
+    /// </summary>
+    /// <param name="input">The template text.</param>
     private sealed class Scanner(string input)
     {
+        /// <summary>
+        /// Gets the template text.
+        /// </summary>
         public string Input { get; } = input;
 
+        /// <summary>
+        /// Gets the current position, in UTF-16 code units.
+        /// </summary>
         public int Pos { get; private set; }
 
+        /// <summary>
+        /// Gets whether the whole template has been read.
+        /// </summary>
         public bool IsAtEnd => Pos >= Input.Length;
 
-        /// <summary>Returns the code point at the offset (in code points, approximated as UTF-16 units past the first).</summary>
+        /// <summary>
+        /// Returns the code point at the offset (in code points, approximated as UTF-16 units past the first).
+        /// </summary>
         public string Peek(int offset = 0)
         {
             int target = Pos + offset;
@@ -418,6 +484,9 @@ public static class ExpressionParser
             return Rune.TryGetRuneAt(Input, target, out Rune rune) ? rune.ToString() : Input[target].ToString();
         }
 
+        /// <summary>
+        /// Consumes <paramref name="count"/> UTF-16 code units, or the next code point when no count is given, and returns them.
+        /// </summary>
         public string Advance(int? count = null)
         {
             int step = count ?? (IsAtEnd ? 1 : Peek().Length);
@@ -427,8 +496,15 @@ public static class ExpressionParser
             return text;
         }
 
+        /// <summary>
+        /// Whether the text at the current position starts with <paramref name="expected"/>.
+        /// </summary>
         public bool Matches(string expected) => Input.AsSpan(Math.Min(Pos, Input.Length)).StartsWith(expected, StringComparison.Ordinal);
 
+        /// <summary>
+        /// Consumes <paramref name="keyword"/> when it is at the current position as a whole word.
+        /// </summary>
+        /// <returns>False, consuming nothing, when the keyword is absent or continues into an identifier.</returns>
         public bool MatchesKeyword(string keyword)
         {
             if (!Matches(keyword))
@@ -446,6 +522,9 @@ public static class ExpressionParser
             return true;
         }
 
+        /// <summary>
+        /// Skips white space.
+        /// </summary>
         public void SkipWhitespace()
         {
             while (!IsAtEnd && char.IsWhiteSpace(Input[Pos]))

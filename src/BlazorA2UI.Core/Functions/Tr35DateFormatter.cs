@@ -3,9 +3,14 @@ using System.Text;
 
 namespace BlazorA2UI.Functions;
 
-/// <summary>Formats dates with Unicode TR35 patterns (<c>yyyy-MM-dd</c>, <c>EEE MMM d, h:mm a</c>, ...).</summary>
+/// <summary>
+/// Formats dates with Unicode TR35 patterns (<c>yyyy-MM-dd</c>, <c>EEE MMM d, h:mm a</c>, ...).
+/// </summary>
 internal static class Tr35DateFormatter
 {
+    /// <summary>
+    /// Formats <paramref name="value"/> with a TR35 pattern; quoted text is copied and unknown letters are kept as they are.
+    /// </summary>
     public static string Format(DateTimeOffset value, string pattern, CultureInfo culture)
     {
         DateTimeFormatInfo info = culture.DateTimeFormat;
@@ -56,8 +61,14 @@ internal static class Tr35DateFormatter
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Formats a number with at least <paramref name="width"/> digits.
+    /// </summary>
     private static string Pad(long value, int width) => value.ToString(new string('0', Math.Max(1, width)), CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// Formats one pattern field, such as <c>yyyy</c> or <c>MMM</c>, from its letter and repeat count.
+    /// </summary>
     private static string Field(char c, int count, DateTime dt, TimeSpan offset, DateTimeFormatInfo info, CultureInfo culture)
     {
         switch (c)

@@ -14,11 +14,24 @@ namespace BlazorA2UI.Processing;
 /// </summary>
 internal static class ComponentParser
 {
+    /// <summary>
+    /// The schema reference that strict validation checks <c>@accessibility</c> against.
+    /// </summary>
     private static readonly JsonObject s_accessibilitySchema = new() { ["$ref"] = "common_types.json#/$defs/AccessibilityAttributes" };
 
+    /// <summary>
+    /// The envelope keys that v1.0 spells with <c>@</c> and that older payloads may send without it.
+    /// </summary>
     private static readonly string[] s_envelopeKeys = ["catalogId", "accessibility", "metadata", "checks"];
 
-    public static ComponentInstance Parse(JsonObject raw, Surface surface, CatalogRegistry catalogs, A2UIValidationConfig? validation = null)
+    /// <summary>
+    /// Parses and checks one component object from <c>updateComponents</c> or <c>createSurface</c>.
+    /// </summary>
+    /// <param name="raw">The component object.</param>
+    /// <param name="surface">The surface it belongs to, whose catalogs it may use.</param>
+    /// <param name="validation">The validation rules, or null for a streaming renderer: unknown types become placeholders and property schemas are not checked.</param>
+    /// <exception cref="A2UIException">The component is invalid; the error carries the code and the path inside the component.</exception>
+    public static ComponentInstance Parse(JsonObject raw, Surface surface, A2UIValidationConfig? validation = null)
     {
         string id = A2UIValues.AsString(raw["id"]) ?? throw new A2UIValidationException("A component needs a string 'id'.");
         if (!Uax31.IsIdentifier(id))
@@ -180,20 +193,20 @@ internal static class ComponentParser
             }
 
             ValidateDynamic(value, id, key, 0);
-            ValidateCalls(value, id, key, surface, catalogs, validation, 0);
+            ValidatePropertyCalls(value, id, key, surface, validation);
             properties[key] = value?.DeepClone();
         }
 
         if (accessibility is not null)
         {
             ValidateDynamic(accessibility, id, "@accessibility", 0);
-            ValidateCalls(accessibility, id, "@accessibility", surface, catalogs, validation, 0);
+            ValidatePropertyCalls(accessibility, id, "@accessibility", surface, validation);
         }
 
         if (checks is not null)
         {
             ValidateDynamic(checks, id, "@checks", 0);
-            ValidateCalls(checks, id, "@checks", surface, catalogs, validation, 0);
+            ValidatePropertyCalls(checks, id, "@checks", surface, validation);
         }
 
         return new ComponentInstance(
@@ -242,10 +255,20 @@ internal static class ComponentParser
     /// there; renderer content must not call <c>agentOnly</c> functions; literal arguments must fit
     /// the function's argument schema; and <c>formatString</c> templates must parse.
     /// </summary>
-    private static void ValidateCalls(
-        JsonNode? node, string componentId, string property, Surface surface, CatalogRegistry catalogs, A2UIValidationConfig? validation, int depth) =>
-        ValidateCalls(node, componentId, "/" + Data.JsonPointer.Escape(property), surface, validation, depth);
+    private static void ValidatePropertyCalls(
+        JsonNode? node, string componentId, string property, Surface surface, A2UIValidationConfig? validation) =>
+        ValidateCalls(node, componentId, "/" + Data.JsonPointer.Escape(property), surface, validation, 0);
 
+    /// <summary>
+    /// Checks the function calls in a property value against their catalogs: the catalog exists, the function is known (under validation) and callable from a binding, and literal arguments fit its schema.
+    /// </summary>
+    /// <param name="node">The value to check.</param>
+    /// <param name="componentId">The component id, for messages.</param>
+    /// <param name="pointer">The JSON Pointer of <paramref name="node"/> inside the component.</param>
+    /// <param name="surface">The surface, whose catalogs calls may use.</param>
+    /// <param name="validation">The validation rules, or null.</param>
+    /// <param name="depth">The current nesting depth.</param>
+    /// <exception cref="A2UIException">A call is invalid.</exception>
     private static void ValidateCalls(
         JsonNode? node, string componentId, string pointer, Surface surface, A2UIValidationConfig? validation, int depth)
     {

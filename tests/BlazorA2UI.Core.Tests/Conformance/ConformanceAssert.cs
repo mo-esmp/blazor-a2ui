@@ -2,18 +2,23 @@
 using System.Text.Json.Nodes;
 using BlazorA2UI.Evaluation;
 using BlazorA2UI.Processing;
+using Shouldly;
 using Xunit;
 
 namespace BlazorA2UI.Tests.Conformance;
 
-/// <summary>Assertions shared by the conformance harnesses.</summary>
+/// <summary>
+/// Assertions shared by the conformance harnesses.
+/// </summary>
 internal static class ConformanceAssert
 {
-    /// <summary>Checks an error against a case's <c>expectError</c> category and message fragment.</summary>
+    /// <summary>
+    /// Checks an error against a case's <c>expectError</c> category and message fragment.
+    /// </summary>
     public static void Error(JsonObject expected, Exception? actual, string name)
     {
         string? category = Str(expected["category"]);
-        Assert.True(actual is not null, $"{name}: expected a {category} error but none was raised");
+        actual.ShouldNotBeNull($"{name}: expected a {category} error but none was raised");
         string? code = (actual as A2UIException)?.Code;
         string[] accepted = category switch
         {
@@ -32,10 +37,10 @@ internal static class ConformanceAssert
             null => [code ?? string.Empty],
             _ => [code ?? string.Empty],
         };
-        Assert.True(accepted.Contains(code), $"{name}: expected {category}, got {code}: {actual!.Message}");
+        accepted.Contains(code).ShouldBeTrue($"{name}: expected {category}, got {code}: {actual.Message}");
         if (Str(expected["message"]) is { } message)
         {
-            Assert.True(MessageMatches(message, actual!.Message), $"{name}: expected message containing '{message}', got '{actual.Message}'");
+            MessageMatches(message, actual.Message).ShouldBeTrue($"{name}: expected message containing '{message}', got '{actual.Message}'");
         }
     }
 
@@ -56,21 +61,24 @@ internal static class ConformanceAssert
                || e.Contains("protocol version mismatch", StringComparison.Ordinal) && a.Contains("protocol version mismatch", StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Asserts that two JSON values are equal, comparing numbers by value and treating JSON null like a missing value.
+    /// </summary>
     public static void Json(JsonNode? expected, JsonNode? actual, string because)
     {
         if (expected is JsonValue ev && actual is JsonValue av
             && ev.GetValueKind() == JsonValueKind.Number && av.GetValueKind() == JsonValueKind.Number)
         {
-            Assert.True(A2UIValues.ToDouble(ev) == A2UIValues.ToDouble(av), $"{because}: expected {ev}, got {av}");
+            (A2UIValues.ToDouble(ev) == A2UIValues.ToDouble(av)).ShouldBeTrue($"{because}: expected {ev}, got {av}");
             return;
         }
 
-        Assert.True(
-            JsonNode.DeepEquals(Normalize(expected), Normalize(actual)),
-            $"{because}: expected {expected?.ToJsonString() ?? "null"}, got {actual?.ToJsonString() ?? "null"}");
+        JsonNode.DeepEquals(Normalize(expected), Normalize(actual)).ShouldBeTrue($"{because}: expected {expected?.ToJsonString() ?? "null"}, got {actual?.ToJsonString() ?? "null"}");
     }
 
-    /// <summary>Like <see cref="Json"/>, but a number also matches its string form (as in the reference harness).</summary>
+    /// <summary>
+    /// Like <see cref="Json"/>, but a number also matches its string form (as in the reference harness).
+    /// </summary>
     public static void PropertyValue(JsonNode? expected, JsonNode? actual, string because)
     {
         if (expected is JsonValue ev && ev.GetValueKind() == JsonValueKind.String
@@ -83,14 +91,16 @@ internal static class ConformanceAssert
         Json(expected, actual, because);
     }
 
-    /// <summary>Checks <c>isValid</c>, <c>validationErrors</c>, <c>validationResults</c> and <c>validationResult</c> expectations.</summary>
+    /// <summary>
+    /// Checks <c>isValid</c>, <c>validationErrors</c>, <c>validationResults</c> and <c>validationResult</c> expectations.
+    /// </summary>
     public static void ValidationFields(
         JsonObject expectedSurface,
         Surface surface,
         IReadOnlyDictionary<string, ProcessingConformanceTests.RenderedNode> rendered,
         string name)
     {
-        foreach (string? check in new[] { "isValid", "validationErrors", "validationResults", "validationResult" })
+        foreach (string check in new[] { "isValid", "validationErrors", "validationResults", "validationResult" })
         {
             if (expectedSurface[check] is not JsonObject perComponent)
             {
@@ -99,12 +109,12 @@ internal static class ConformanceAssert
 
             foreach ((string key, JsonNode? expectedValue) in perComponent)
             {
-                Assert.True(rendered.TryGetValue(key, out ProcessingConformanceTests.RenderedNode? r), $"{name}: component instance '{key}' was not rendered");
-                CheckOutcome outcome = surface.EvaluateChecks(r!.Component, r.Context);
+                rendered.TryGetValue(key, out ProcessingConformanceTests.RenderedNode? r).ShouldBeTrue($"{name}: component instance '{key}' was not rendered");
+                CheckOutcome outcome = surface.EvaluateChecks(r.Required().Component, r.Context);
                 switch (check)
                 {
                     case "isValid":
-                        Assert.Equal(expectedValue!.GetValue<bool>(), outcome.IsValid);
+                        outcome.IsValid.ShouldBe(expectedValue.Required().GetValue<bool>());
                         break;
                     case "validationErrors":
                         Json(expectedValue, new JsonArray(outcome.ErrorMessages.Select(m => (JsonNode)m).ToArray()), $"{name}: {key} errors");
@@ -114,7 +124,7 @@ internal static class ConformanceAssert
                         break;
                     case "validationResult":
                         JsonObject actual = outcome.Failures.FirstOrDefault() ?? new JsonObject { ["valid"] = true };
-                        foreach ((string k, JsonNode? v) in expectedValue!.AsObject())
+                        foreach ((string k, JsonNode? v) in expectedValue.Required().AsObject())
                         {
                             Json(v, actual[k], $"{name}: {key} result.{k}");
                         }
@@ -125,16 +135,22 @@ internal static class ConformanceAssert
         }
     }
 
+    /// <summary>
+    /// Normalizes a JSON value for comparison: numbers become doubles and JSON null becomes null.
+    /// </summary>
     private static JsonNode? Normalize(JsonNode? node) => node switch
     {
         null => null,
-        JsonValue v when v.GetValueKind() == JsonValueKind.Number => JsonValue.Create(A2UIValues.ToDouble(v)!.Value),
+        JsonValue v when v.GetValueKind() == JsonValueKind.Number => JsonValue.Create(A2UIValues.ToDouble(v).Required()),
         JsonValue v when v.GetValueKind() == JsonValueKind.Null => null,
         JsonObject o => new JsonObject(o.Select(p => KeyValuePair.Create(p.Key, Normalize(p.Value)))),
         JsonArray a => new JsonArray(a.Select(Normalize).ToArray()),
         _ => node.DeepClone(),
     };
 
+    /// <summary>
+    /// Reads a string value, or null when the node is not a string.
+    /// </summary>
     private static string? Str(JsonNode? node) =>
         node is JsonValue v && v.TryGetValue<string>(out string? s) ? s : null;
 }
