@@ -214,8 +214,17 @@ public sealed class A2UIEvaluator
         if (!TryGetCatalog(context, catalogId, out Catalog? catalog))
         {
             throw scope.Mode == EvaluationMode.AgentCall
-                ? new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Catalog '{catalogId}' is not registered on this renderer.")
+                ? new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Catalog not found: {catalogId}")
                 : new A2UICatalogException($"Catalog not found: {catalogId}");
+        }
+
+        if (catalog.ProtocolVersion != A2UIProtocol.Version)
+        {
+            // Only detached evaluations can reach such a catalog: surfaces never list one.
+            string mismatch = $"Catalog '{catalogId}' targets protocol version {catalog.ProtocolVersion}, which does not match message protocol version {A2UIProtocol.Version}.";
+            throw scope.Mode == EvaluationMode.AgentCall
+                ? new A2UIException(A2UIErrorCodes.InvalidFunctionCall, mismatch)
+                : new A2UICatalogException(mismatch);
         }
 
         catalog.Functions.TryGetValue(name, out FunctionDefinition? definition);
@@ -244,27 +253,24 @@ public sealed class A2UIEvaluator
         if (definition?.Implementation is { } implementation)
         {
             FunctionInvocation invocation = new(name, catalog.CatalogId, args, context, scope, this);
-            if (name == "formatString")
-            {
-                // Calls inside ${...} resolve against the catalog this call resolved to.
-                string? previous = scope.CatalogOverride;
-                scope.CatalogOverride = catalog.CatalogId;
-                try
-                {
-                    return await InvokeAsync(implementation, invocation).ConfigureAwait(false);
-                }
-                finally
-                {
-                    scope.CatalogOverride = previous;
-                }
-            }
 
-            return await RunLocalAsync(implementation, invocation, catalog.CatalogId, name, args, context, scope).ConfigureAwait(false);
+            // Calls that the implementation evaluates itself, such as the parts of a formatString
+            // template, resolve against the catalog this call resolved to.
+            string? previous = scope.CatalogOverride;
+            scope.CatalogOverride = catalog.CatalogId;
+            try
+            {
+                return await RunLocalAsync(implementation, invocation, catalog.CatalogId, name, args, context, scope).ConfigureAwait(false);
+            }
+            finally
+            {
+                scope.CatalogOverride = previous;
+            }
         }
 
         if (scope.Mode == EvaluationMode.AgentCall)
         {
-            throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Function '{name}' is not registered on this renderer.");
+            throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Function not found: {name}");
         }
 
         if (scope.InTemplate)
@@ -315,7 +321,7 @@ public sealed class A2UIEvaluator
         {
             if (definition is null || !definition.IsLocal)
             {
-                throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Function '{name}' is not registered on this renderer.");
+                throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Function not found: {name}");
             }
 
             if (definition.AllowedCallers == AllowedCallers.RendererOnly)
@@ -325,11 +331,11 @@ public sealed class A2UIEvaluator
                     $"Function '{name}' cannot be called by agent (allowedCallers is rendererOnly).");
             }
 
-            if (definition.RequiresUserActivation)
+            if (definition.RequiresUserActivation && !scope.UserActivated)
             {
                 throw new A2UIException(
                     A2UIErrorCodes.InvalidFunctionCall,
-                    $"Function '{name}' requires user activation and cannot be called by the agent.");
+                    $"Function '{name}' requires user activation context to execute.");
             }
 
             return;
@@ -365,7 +371,7 @@ public sealed class A2UIEvaluator
             if (scope.Mode == EvaluationMode.AgentCall)
             {
                 // Static nested calls are checked before any argument expression runs.
-                PreflightNestedCalls(rawArgs, catalog, context, 0);
+                PreflightNestedCalls(rawArgs, catalog, context, scope, inTemplate: false, 0);
             }
 
             foreach ((string key, JsonNode? raw) in rawArgs)
@@ -380,10 +386,9 @@ public sealed class A2UIEvaluator
             string? problem = ArgsSchema.Validate(schema, args);
             if (problem is not null)
             {
-                string message = $"Validation failed for function '{name}': {problem}";
                 throw scope.Mode == EvaluationMode.AgentCall
-                    ? new A2UIException(A2UIErrorCodes.InvalidFunctionCall, message)
-                    : new A2UIExpressionException(message);
+                    ? new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Invalid arguments for function '{name}': {problem}")
+                    : new A2UIExpressionException($"Validation failed for function '{name}': {problem}");
             }
         }
 
@@ -398,9 +403,45 @@ public sealed class A2UIEvaluator
         context.Surface is { } surface ? surface.TryGetCatalog(catalogId, out catalog) : Catalogs.TryGet(catalogId, out catalog);
 
     /// <summary>
-    /// Checks the static nested calls in an agent's <c>callRendererFunction</c> arguments before any of them runs, so a call that crosses a boundary fails without side effects.
+    /// Checks the calls in a parsed <c>${...}</c> template before any part of it is evaluated, when the template is
+    /// evaluated for an agent's <c>callRendererFunction</c>. A call that crosses a boundary then fails without side
+    /// effects and takes priority over other errors in the same template; a function that cannot be resolved is left
+    /// for the evaluation to report. Outside an agent call this does nothing.
+    /// A function that interprets a string argument as a template (as <c>formatString</c> does) calls this; literal
+    /// text, including escaped <c>\${</c>, is never parsed as a call.
     /// </summary>
-    private void PreflightNestedCalls(JsonNode? node, Catalog defaultCatalog, EvaluationContext context, int depth)
+    /// <param name="parts">The template's parts, as <see cref="ExpressionParser.Parse(string, int)"/> returns them.</param>
+    /// <param name="context">The evaluation context, which decides which catalogs are visible.</param>
+    /// <param name="scope">The scope the template is evaluated in.</param>
+    /// <exception cref="A2UIException">A call in the template crosses a boundary or names an unknown catalog; nothing has run.</exception>
+    internal void PreflightTemplate(IReadOnlyList<JsonNode?> parts, EvaluationContext context, EvaluationScope scope)
+    {
+        if (scope.Mode != EvaluationMode.AgentCall
+            || (scope.CatalogOverride ?? context.Surface?.CatalogId) is not { } catalogId
+            || !TryGetCatalog(context, catalogId, out Catalog? catalog))
+        {
+            return;
+        }
+
+        foreach (JsonNode? part in parts)
+        {
+            PreflightNestedCalls(part, catalog, context, scope, inTemplate: true, 1);
+        }
+    }
+
+    /// <summary>
+    /// Checks the static nested calls in an agent's <c>callRendererFunction</c> arguments before any of them runs, so a call that crosses a boundary fails without side effects.
+    /// String arguments are data and are not parsed here: a function that interprets one as a template checks it with
+    /// <see cref="PreflightTemplate"/> before evaluating it.
+    /// </summary>
+    /// <param name="node">The argument value to check.</param>
+    /// <param name="defaultCatalog">The catalog that calls without a <c>catalogId</c> resolve to.</param>
+    /// <param name="context">The evaluation context, which decides which catalogs are visible.</param>
+    /// <param name="scope">The agent call's scope, which carries its user activation.</param>
+    /// <param name="inTemplate">Whether <paramref name="node"/> was parsed from a template string.</param>
+    /// <param name="depth">The nesting depth, bounded by <see cref="MaxDepth"/>.</param>
+    /// <exception cref="A2UIException">A nested call crosses a boundary or names an unknown catalog; nothing has run.</exception>
+    private void PreflightNestedCalls(JsonNode? node, Catalog defaultCatalog, EvaluationContext context, EvaluationScope scope, bool inTemplate, int depth)
     {
         if (depth > MaxDepth)
         {
@@ -410,28 +451,32 @@ public sealed class A2UIEvaluator
         switch (node)
         {
             case JsonObject obj:
+                Catalog catalog = defaultCatalog;
                 if (A2UIValues.AsString(obj["@call"]) is { } nested && !nested.StartsWith('@'))
                 {
-                    Catalog? catalog = defaultCatalog;
-                    if (A2UIValues.AsString(obj["catalogId"]) is { } id && !TryGetCatalog(context, id, out catalog))
+                    if (A2UIValues.AsString(obj["catalogId"]) is { } id)
                     {
-                        throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Catalog '{id}' is not registered on this renderer.");
+                        catalog = TryGetCatalog(context, id, out Catalog? named)
+                            ? named
+                            : throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Catalog not found: {id}");
                     }
 
-                    catalog.Functions.TryGetValue(nested, out FunctionDefinition? definition);
-                    CheckBoundaries(nested, definition, new EvaluationScope(EvaluationMode.AgentCall));
+                    if (catalog.Functions.TryGetValue(nested, out FunctionDefinition? definition) || !inTemplate)
+                    {
+                        CheckBoundaries(nested, definition, scope);
+                    }
                 }
 
                 foreach ((string _, JsonNode? child) in obj)
                 {
-                    PreflightNestedCalls(child, defaultCatalog, context, depth + 1);
+                    PreflightNestedCalls(child, catalog, context, scope, inTemplate, depth + 1);
                 }
 
                 break;
             case JsonArray arr:
                 foreach (JsonNode? item in arr)
                 {
-                    PreflightNestedCalls(item, defaultCatalog, context, depth + 1);
+                    PreflightNestedCalls(item, defaultCatalog, context, scope, inTemplate, depth + 1);
                 }
 
                 break;

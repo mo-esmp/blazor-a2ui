@@ -45,9 +45,16 @@ public sealed class EvaluationScope
     public EvaluationMode Mode { get; }
 
     /// <summary>
-    /// True when the evaluation runs from a user gesture.
+    /// True when the evaluation runs from a user gesture: by default for actions only, unless
+    /// <see cref="UserActivationOverride"/> says otherwise.
     /// </summary>
-    public bool UserActivated => Mode == EvaluationMode.Action;
+    public bool UserActivated => UserActivationOverride ?? Mode == EvaluationMode.Action;
+
+    /// <summary>
+    /// Gets whether a user gesture is present, when the host knows better than the mode: an action the
+    /// host runs without a gesture, or an agent call the host processes inside one. Null uses the mode.
+    /// </summary>
+    internal bool? UserActivationOverride { get; init; }
 
     /// <summary>
     /// True for bindings and checks, whose remote calls are shared and cached.

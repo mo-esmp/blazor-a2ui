@@ -66,6 +66,21 @@ public static class A2UIErrorCodes
     /// An agent call did not answer in time.
     /// </summary>
     public const string Timeout = "TIMEOUT";
+
+    /// <summary>
+    /// An agent call could not be sent because the renderer has no outbound connection. Never sent to the agent.
+    /// </summary>
+    public const string NoListener = "NO_LISTENER";
+
+    /// <summary>
+    /// An agent call reused the id of a call that is still waiting. Never sent to the agent.
+    /// </summary>
+    public const string Duplicate = "DUPLICATE";
+
+    /// <summary>
+    /// An agent call was made after the processor was disposed. Never sent to the agent.
+    /// </summary>
+    public const string Disposed = "DISPOSED";
 }
 
 /// <summary>

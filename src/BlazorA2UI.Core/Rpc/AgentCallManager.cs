@@ -26,9 +26,10 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
     /// </summary>
     private readonly Dictionary<string, PendingCall> _pending = new(StringComparer.Ordinal);
     /// <summary>
-    /// Guards the call maps.
+    /// Guards the call maps. It is the processor's agent-call gate, shared by every surface, so reserving an id
+    /// and registering its call take one lock and no two locks can be taken in opposite orders.
     /// </summary>
-    private readonly object _gate = new();
+    private readonly object _gate;
 
     /// <summary>
     /// Creates the manager for <paramref name="surface"/>.
@@ -36,6 +37,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
     public AgentCallManager(Surface surface)
     {
         _surface = surface;
+        _gate = surface.Processor.AgentCallGate;
     }
 
     /// <summary>
@@ -91,7 +93,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
                     ?? new A2UIExpressionException($"The agent call to '{name}' failed.");
         throw error.Code == A2UIErrorCodes.Cancelled
             ? new A2UIException(A2UIErrorCodes.Cancelled, error.Message)
-            : new A2UIExpressionException($"Agent function '{name}' failed: {error.Message}");
+            : new A2UIExpressionException($"Agent function '{name}' failed: {error.Message}") { FunctionCallId = entry.Call.FunctionCallId };
     }
 
     /// <summary>
@@ -100,6 +102,12 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
     /// <exception cref="A2UIException">The call failed, timed out, was cancelled, or could not be sent.</exception>
     public async Task<JsonNode?> CallAsync(string catalogId, string name, JsonObject args, CancellationToken cancellationToken)
     {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            // Nothing is sent: the agent must not run a function the host has already given up on.
+            throw new A2UIException(A2UIErrorCodes.Cancelled, "The action was cancelled.");
+        }
+
         PendingCall call = Send(catalogId, name, args);
         using CancellationTokenRegistration registration = cancellationToken.Register(() => Cancel(call, "The action was cancelled."));
         try
@@ -112,8 +120,60 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         }
         catch (A2UIException ex)
         {
-            throw new A2UIExpressionException($"Agent function '{name}' failed: {ex.Message}");
+            throw new A2UIExpressionException($"Agent function '{name}' failed: {ex.Message}") { FunctionCallId = call.FunctionCallId };
         }
+    }
+
+    /// <summary>
+    /// Calls an agent function for the host and waits for the answer, keeping the call's own error codes.
+    /// </summary>
+    /// <param name="catalogId">The catalog the function belongs to.</param>
+    /// <param name="name">The function name.</param>
+    /// <param name="args">The arguments to send.</param>
+    /// <param name="options">The call id and timeout, or null for the defaults.</param>
+    /// <param name="cancellationToken">Cancels the call; the call then fails with <see cref="A2UIErrorCodes.Cancelled"/>.</param>
+    /// <exception cref="A2UIException">
+    /// The call could not be sent (<see cref="A2UIErrorCodes.NoListener"/>, <see cref="A2UIErrorCodes.Duplicate"/>,
+    /// <see cref="A2UIErrorCodes.Disposed"/>), timed out, was cancelled, or the agent answered with an error, whose code it keeps.
+    /// </exception>
+    public Task<JsonNode?> CallForHostAsync(
+        string catalogId,
+        string name,
+        JsonObject args,
+        A2UIAgentCallOptions? options,
+        CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            // Nothing is sent: the agent must not run a function the host has already given up on.
+            return Task.FromException<JsonNode?>(new A2UIException(A2UIErrorCodes.Cancelled, "The call was cancelled.")
+            {
+                FunctionCallId = options?.FunctionCallId,
+            });
+        }
+
+        PendingCall call;
+        try
+        {
+            call = SendCore(catalogId, name, args, options?.FunctionCallId, options?.Timeout);
+        }
+        catch (A2UIException ex)
+        {
+            return Task.FromException<JsonNode?>(ex);
+        }
+
+        // Without a token the call's own task is returned, so it is complete as soon as the answer is processed.
+        return cancellationToken.CanBeCanceled ? WaitAsync(call, cancellationToken) : call.Task;
+    }
+
+    /// <summary>
+    /// Waits for a host call, cancelling it when <paramref name="cancellationToken"/> fires.
+    /// </summary>
+    /// <exception cref="A2UIException">The call failed, timed out or was cancelled.</exception>
+    private async Task<JsonNode?> WaitAsync(PendingCall call, CancellationToken cancellationToken)
+    {
+        using CancellationTokenRegistration registration = cancellationToken.Register(() => Cancel(call, "The call was cancelled."));
+        return await call.Task.ConfigureAwait(false);
     }
 
     /// <summary>
@@ -130,6 +190,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
             }
         }
 
+        _surface.Processor.ReleaseAgentCall(functionCallId);
         if (response["error"] is JsonObject error)
         {
             call.Fail(new A2UIException(
@@ -148,17 +209,6 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
     }
 
     /// <summary>
-    /// Whether a call with this id is waiting for an answer here.
-    /// </summary>
-    public bool Owns(string functionCallId)
-    {
-        lock (_gate)
-        {
-            return _pending.ContainsKey(functionCallId);
-        }
-    }
-
-    /// <summary>
     /// Cancels every pending call (when the surface is deleted).
     /// </summary>
     public void CancelAll(string reason)
@@ -173,51 +223,82 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
 
         foreach (PendingCall call in calls)
         {
+            _surface.Processor.ReleaseAgentCall(call.FunctionCallId);
             call.Cancel(reason);
+        }
+    }
+
+    /// <summary>
+    /// Sends a <c>callAgentFunction</c> message for a binding or an action, with a generated id and the default timeout.
+    /// </summary>
+    /// <exception cref="A2UIExpressionException">The call could not be sent: no connection to the agent, too many calls waiting, or the processor was disposed.</exception>
+    private PendingCall Send(string catalogId, string name, JsonObject args)
+    {
+        try
+        {
+            return SendCore(catalogId, name, args, functionCallId: null, timeout: null);
+        }
+        catch (A2UIException ex) when (ex is not A2UIExpressionException)
+        {
+            throw new A2UIExpressionException(ex.Message);
         }
     }
 
     /// <summary>
     /// Sends a <c>callAgentFunction</c> message and registers the call, with its timeout.
     /// </summary>
-    /// <exception cref="A2UIExpressionException">The renderer has no connection to the agent, or too many calls are already waiting.</exception>
-    private PendingCall Send(string catalogId, string name, JsonObject args)
+    /// <param name="catalogId">The catalog the function belongs to.</param>
+    /// <param name="name">The function name.</param>
+    /// <param name="args">The arguments to send.</param>
+    /// <param name="functionCallId">The id to send, or null to generate one.</param>
+    /// <param name="timeout">How long to wait, or null for <see cref="A2UIProcessorOptions.AgentCallTimeout"/>.</param>
+    /// <exception cref="A2UIException">
+    /// Nothing was sent: the processor was disposed (<see cref="A2UIErrorCodes.Disposed"/>), it has no outbound connection
+    /// (<see cref="A2UIErrorCodes.NoListener"/>), the id is already waiting (<see cref="A2UIErrorCodes.Duplicate"/>), or too many calls are waiting.
+    /// </exception>
+    private PendingCall SendCore(string catalogId, string name, JsonObject args, string? functionCallId, TimeSpan? timeout)
     {
         MessageProcessor processor = _surface.Processor;
         if (!processor.HasOutbound)
         {
-            throw new A2UIExpressionException($"Function '{name}' must run on the agent, but the renderer has no connection to the agent.");
+            throw new A2UIException(A2UIErrorCodes.NoListener, $"Function '{name}' must run on the agent, but the renderer has no connection to the agent.");
         }
 
-        PendingCall call = new($"fc_{Guid.NewGuid():N}");
-        lock (_gate)
+        PendingCall call = new(functionCallId ?? $"fc_{Guid.NewGuid():N}");
+
+        // The id is reserved for the whole processor and the call registered in one step, so two sends
+        // cannot both claim an id and disposal either refuses this call or finds it and cancels it.
+        processor.ReserveAgentCall(call.FunctionCallId, () =>
         {
-            if (_pending.Count >= processor.Options.MaxPendingAgentCalls)
+            lock (_gate)
             {
-                throw new A2UIExpressionException("Too many agent function calls are waiting for an answer.");
-            }
+                if (_pending.Count >= processor.Options.MaxPendingAgentCalls)
+                {
+                    throw new A2UIException(A2UIErrorCodes.ExecutionError, "Too many agent function calls are waiting for an answer.")
+                    {
+                        FunctionCallId = call.FunctionCallId,
+                    };
+                }
 
-            _pending[call.FunctionCallId] = call;
+                _pending.Add(call.FunctionCallId, call);
+            }
+        });
+
+        if (TimerDelay(timeout ?? processor.Options.AgentCallTimeout) is { } wait)
+        {
+            call.StartTimer(wait, () =>
+            {
+                if (TryRemove(call))
+                {
+                    call.Fail(new A2UIException(A2UIErrorCodes.Timeout, $"The agent did not answer '{name}' in time.") { FunctionCallId = call.FunctionCallId });
+                }
+            });
         }
 
-        TimeSpan timeout = processor.Options.AgentCallTimeout;
-        if (timeout > TimeSpan.Zero && timeout != Timeout.InfiniteTimeSpan)
+        if (call.Task.IsCompleted)
         {
-            _ = Task.Delay(timeout).ContinueWith(
-                _ =>
-                {
-                    bool removed;
-                    lock (_gate)
-                    {
-                        removed = _pending.Remove(call.FunctionCallId);
-                    }
-
-                    if (removed)
-                    {
-                        call.Fail(new A2UIException(A2UIErrorCodes.Timeout, $"The agent did not answer '{name}' in time."));
-                    }
-                },
-                TaskScheduler.Default);
+            // Disposal (or a surface deletion) cancelled the call after it was registered: the agent is not asked.
+            return call;
         }
 
         JsonObject message = new()
@@ -245,12 +326,45 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
     /// </summary>
     private void Cancel(PendingCall call, string reason)
     {
+        TryRemove(call);
+        call.Cancel(reason);
+    }
+
+    /// <summary>
+    /// Removes <paramref name="call"/> from the pending calls and releases its id, but only while the entry
+    /// under its id is still this call: a later call that reuses the id is left alone.
+    /// </summary>
+    /// <param name="call">The call to remove.</param>
+    /// <returns>False when the call had already settled; nothing changes then.</returns>
+    private bool TryRemove(PendingCall call)
+    {
         lock (_gate)
         {
+            if (!_pending.TryGetValue(call.FunctionCallId, out PendingCall? current) || !ReferenceEquals(current, call))
+            {
+                return false;
+            }
+
             _pending.Remove(call.FunctionCallId);
         }
 
-        call.Cancel(reason);
+        _surface.Processor.ReleaseAgentCall(call.FunctionCallId);
+        return true;
+    }
+
+    /// <summary>
+    /// The delay of a call's timeout timer, or null for a call that waits forever: <see cref="Timeout.InfiniteTimeSpan"/>,
+    /// zero or negative. A delay beyond <see cref="MessageProcessor.MaxAgentCallTimeout"/> is capped there.
+    /// </summary>
+    /// <param name="timeout">The configured timeout.</param>
+    private static TimeSpan? TimerDelay(TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+        {
+            return null;
+        }
+
+        return timeout > MessageProcessor.MaxAgentCallTimeout ? MessageProcessor.MaxAgentCallTimeout : timeout;
     }
 
     /// <summary>
@@ -368,9 +482,43 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         public Task<JsonNode?> Task => _tcs.Task;
 
         /// <summary>
+        /// Guards <see cref="_timer"/>, which settling and starting the timer can touch from different threads.
+        /// </summary>
+        private readonly object _timerGate = new();
+
+        /// <summary>
+        /// The call's timeout timer, or null when it has none or has settled.
+        /// </summary>
+        private CancellationTokenSource? _timer;
+
+        /// <summary>
         /// Gets the answer, once the call has succeeded.
         /// </summary>
         public JsonNode? Value { get; private set; }
+
+        /// <summary>
+        /// Starts the timeout timer, which runs <paramref name="onTimeout"/> after <paramref name="delay"/> unless
+        /// the call settles first. A call that has already settled starts no timer.
+        /// </summary>
+        /// <param name="delay">How long to wait, at most <see cref="MessageProcessor.MaxAgentCallTimeout"/>.</param>
+        /// <param name="onTimeout">Fails the call when it is still pending.</param>
+        public void StartTimer(TimeSpan delay, Action onTimeout)
+        {
+            CancellationTokenSource timer = new();
+            lock (_timerGate)
+            {
+                if (_tcs.Task.IsCompleted)
+                {
+                    timer.Dispose();
+                    return;
+                }
+
+                // Armed under the gate, so a concurrent settle cannot dispose the timer between these calls.
+                _timer = timer;
+                timer.Token.Register(onTimeout);
+                timer.CancelAfter(delay);
+            }
+        }
 
         /// <summary>
         /// Settles the call with the agent's answer; a call that has already settled is unchanged.
@@ -382,17 +530,41 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
                 Value = value;
                 _tcs.TrySetResult(value);
             }
+
+            StopTimer();
         }
 
         /// <summary>
         /// Fails the call with <paramref name="error"/>; a call that has already settled is unchanged.
         /// </summary>
-        public void Fail(A2UIException error) => _tcs.TrySetException(error);
+        public void Fail(A2UIException error)
+        {
+            _tcs.TrySetException(error);
+            StopTimer();
+        }
 
         /// <summary>
         /// Cancels the call with a <see cref="A2UIErrorCodes.Cancelled"/> error; a call that has already settled is unchanged.
         /// </summary>
-        public void Cancel(string reason) =>
+        public void Cancel(string reason)
+        {
             _tcs.TrySetException(new A2UIException(A2UIErrorCodes.Cancelled, reason) { FunctionCallId = FunctionCallId });
+            StopTimer();
+        }
+
+        /// <summary>
+        /// Disposes the timeout timer so it never fires for a settled call.
+        /// </summary>
+        private void StopTimer()
+        {
+            CancellationTokenSource? timer;
+            lock (_timerGate)
+            {
+                timer = _timer;
+                _timer = null;
+            }
+
+            timer?.Dispose();
+        }
     }
 }

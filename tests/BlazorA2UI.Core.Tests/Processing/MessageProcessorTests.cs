@@ -1,6 +1,8 @@
 ﻿using System.Text.Json.Nodes;
 using BlazorA2UI.Catalogs;
+using BlazorA2UI.Evaluation;
 using BlazorA2UI.Processing;
+using BlazorA2UI.Rpc;
 using Shouldly;
 using Xunit;
 
@@ -243,6 +245,229 @@ public sealed class MessageProcessorTests
         process.ShouldNotThrow();
         errors.ShouldContain(e => e.Code == A2UIErrorCodes.ValidationFailed);
     }
+
+    /// <summary>
+    /// Proves that a catalog for another protocol version can be registered but no surface can be created with it, and it is not advertised.
+    /// </summary>
+    [Fact]
+    public void ProcessOrThrow_CreateSurfaceWithOtherVersionCatalog_ThrowsCatalogNotFound()
+    {
+        // Arrange
+        Catalog old = new("test:v09", [], [], protocolVersion: "0.9");
+        MessageProcessor processor = new([BasicCatalog.Create(), old]);
+
+        // Act
+        Action create = () => processor.ProcessOrThrow(Message("""{"surfaceId":"s","catalogId":"test:v09"}"""));
+
+        // Assert
+        create.ShouldThrow<A2UICatalogException>().Message.ShouldContain("Catalog not found: test:v09");
+        processor.Surfaces.ShouldBeEmpty();
+        processor.GetRendererCapabilities().ToJsonString().ShouldNotContain("test:v09");
+    }
+
+    /// <summary>
+    /// Proves that cancelling the token of a host agent call fails it with CANCELLED and frees its id for a new call.
+    /// </summary>
+    [Fact]
+    public async Task CallAgentFunctionAsync_TokenCancelled_FailsWithCancelledAndFreesIdAsync()
+    {
+        // Arrange
+        MessageProcessor processor = new([BasicCatalog.Create()], new A2UIProcessorOptions { AgentCallTimeout = Timeout.InfiniteTimeSpan });
+        processor.Outbound = _ => ValueTask.CompletedTask;
+        processor.ProcessOrThrow(Message($$$"""{"surfaceId":"s","catalogId":"{{{s_basicId}}}"}"""));
+        using CancellationTokenSource cancel = new();
+        A2UIAgentCallOptions options = new() { FunctionCallId = "fc-1" };
+        Task<JsonNode?> call = processor.CallAgentFunctionAsync("s", s_basicId, "lookup", null, options, cancel.Token);
+
+        // Act
+        await cancel.CancelAsync();
+        A2UIException error = await Should.ThrowAsync<A2UIException>(() => call);
+
+        // Assert
+        error.Code.ShouldBe(A2UIErrorCodes.Cancelled);
+        processor.IsAgentCallPending("fc-1").ShouldBeFalse();
+        Task<JsonNode?> again = processor.CallAgentFunctionAsync("s", s_basicId, "lookup", null, options);
+        again.IsFaulted.ShouldBeFalse();
+        processor.Dispose();
+        (await Should.ThrowAsync<A2UIException>(() => again)).Code.ShouldBe(A2UIErrorCodes.Cancelled);
+    }
+
+    /// <summary>
+    /// Proves that disposing a processor twice is safe and that later host agent calls fail with DISPOSED without sending anything.
+    /// </summary>
+    [Fact]
+    public async Task CallAgentFunctionAsync_AfterDispose_FailsWithDisposedAsync()
+    {
+        // Arrange
+        MessageProcessor processor = new([BasicCatalog.Create()]);
+        int sent = 0;
+        processor.Outbound = _ =>
+        {
+            sent++;
+            return ValueTask.CompletedTask;
+        };
+        processor.ProcessOrThrow(Message($$$"""{"surfaceId":"s","catalogId":"{{{s_basicId}}}"}"""));
+        processor.Dispose();
+
+        // Act
+        processor.Dispose();
+        A2UIException error = await Should.ThrowAsync<A2UIException>(() => processor.CallAgentFunctionAsync("s", s_basicId, "lookup"));
+
+        // Assert
+        error.Code.ShouldBe(A2UIErrorCodes.Disposed);
+        sent.ShouldBe(0);
+        processor.IsDisposed.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Proves that a message processed reentrantly, from a handler running inside a user-activated batch, does not
+    /// inherit the outer gesture, while the same call in the activated batch itself runs.
+    /// </summary>
+    [Fact]
+    public async Task Process_ReentrantDuringActivatedBatch_DoesNotInheritActivationAsync()
+    {
+        // Arrange
+        MessageProcessor processor = new([BasicCatalog.Create(), ToolsCatalog()]);
+        List<A2UIOutboundMessage> sent = Record(processor);
+        processor.SurfaceCreated += _ => processor.Process(RendererCall("inner", "gesture", "{}"));
+        A2UIExecutionContext activated = new() { IsUserActivated = true };
+
+        // Act
+        processor.ProcessWithContextOrThrow(Message($$$"""{"surfaceId":"s","catalogId":"{{{s_basicId}}}"}"""), activated);
+        processor.ProcessWithContextOrThrow(RendererCall("outer", "gesture", "{}"), activated);
+        await processor.WhenIdleAsync();
+
+        // Assert
+        JsonObject inner = Response(sent, "inner");
+        inner["error"]?["code"]?.GetValue<string>().ShouldBe(A2UIErrorCodes.InvalidFunctionCall);
+        inner["error"]?["message"]?.GetValue<string>().ShouldContain("user activation");
+        Response(sent, "outer").ContainsKey("error").ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Proves that <c>ProcessOrThrow(message, null)</c> still compiles and binds to the validation overload, so hosts
+    /// written against the earlier API keep building.
+    /// </summary>
+    [Fact]
+    public void ProcessOrThrow_NullValidation_UsesProcessorDefaults()
+    {
+        // Arrange
+        MessageProcessor processor = new([BasicCatalog.Create()]);
+
+        // Act
+        processor.ProcessOrThrow(Message($$$"""{"surfaceId":"s","catalogId":"{{{s_basicId}}}"}"""), null);
+
+        // Assert
+        processor.Surfaces.ShouldContainKey("s");
+    }
+
+    /// <summary>
+    /// Proves that an RPC argument holding <c>${...}</c> text is data for a function that does not interpret templates:
+    /// the renderer-only call named inside it is not checked, and the text comes back unchanged.
+    /// </summary>
+    [Fact]
+    public async Task Process_RpcLiteralTemplateText_IsNotPreflightedAsync()
+    {
+        // Arrange
+        MessageProcessor processor = new([BasicCatalog.Create(), ToolsCatalog()]);
+        List<A2UIOutboundMessage> sent = Record(processor);
+
+        // Act
+        processor.Process(RendererCall("lit", "echo", """{"value":"${secret()}"}"""));
+        await processor.WhenIdleAsync();
+
+        // Assert
+        JsonObject response = Response(sent, "lit");
+        response.ContainsKey("error").ShouldBeFalse(response.ToJsonString());
+        response["value"]?.GetValue<string>().ShouldBe("${secret()}");
+    }
+
+    /// <summary>
+    /// Proves that a function that does interpret its argument as a template still refuses a renderer-only call
+    /// inside it, before evaluating any part.
+    /// </summary>
+    [Fact]
+    public async Task Process_RpcTemplateCrossingBoundary_IsRefusedAsync()
+    {
+        // Arrange
+        MessageProcessor processor = new([BasicCatalog.Create(), ToolsCatalog()]);
+        List<A2UIOutboundMessage> sent = Record(processor);
+
+        // Act
+        processor.Process(RendererCall("tpl", "format", """{"value":"${missing()}${secret()}"}"""));
+        await processor.WhenIdleAsync();
+
+        // Assert
+        JsonObject response = Response(sent, "tpl");
+        response["error"]?["code"]?.GetValue<string>().ShouldBe(A2UIErrorCodes.InvalidFunctionCall);
+        response["error"]?["message"]?.GetValue<string>().ShouldContain("secret");
+    }
+
+    /// <summary>
+    /// The id of the test catalog that <see cref="ToolsCatalog"/> builds.
+    /// </summary>
+    private const string ToolsId = "https://example.com/tools.json";
+
+    /// <summary>
+    /// Builds a v1.0 catalog of agent-callable test functions: <c>echo</c> returns its <c>value</c>, <c>format</c>
+    /// interprets it as a template (with the basic <c>formatString</c>), <c>gesture</c> needs user activation and
+    /// <c>secret</c> is renderer-only.
+    /// </summary>
+    private static Catalog ToolsCatalog()
+    {
+        A2UIFunction format = BasicCatalog.Create().Functions["formatString"].Implementation
+            ?? throw new InvalidOperationException("The basic catalog has no formatString implementation.");
+        FunctionDefinition[] functions =
+        [
+            new FunctionDefinition("echo") { AllowedCallers = AllowedCallers.RendererOrAgent }
+                .WithImplementation(i => ValueTask.FromResult(i.Arg("value")?.DeepClone())),
+            new FunctionDefinition("format") { AllowedCallers = AllowedCallers.RendererOrAgent }.WithImplementation(format),
+            new FunctionDefinition("gesture") { AllowedCallers = AllowedCallers.RendererOrAgent, RequiresUserActivation = true }
+                .WithImplementation(_ => ValueTask.FromResult<JsonNode?>(JsonValue.Create(true))),
+            new FunctionDefinition("secret") { AllowedCallers = AllowedCallers.RendererOnly }
+                .WithImplementation(_ => ValueTask.FromResult<JsonNode?>(JsonValue.Create("leaked"))),
+        ];
+        return new Catalog(ToolsId, [], functions, A2UIProtocol.Version);
+    }
+
+    /// <summary>
+    /// Builds an agent's <c>callRendererFunction</c> for a function of <see cref="ToolsCatalog"/>.
+    /// </summary>
+    /// <param name="functionCallId">The call's id.</param>
+    /// <param name="name">The function name.</param>
+    /// <param name="args">The arguments, as a JSON object.</param>
+    private static JsonNode? RendererCall(string functionCallId, string name, string args) =>
+        JsonNode.Parse($$$$$"""{"version":"1.0","callRendererFunction":{"functionCallId":"{{{{{functionCallId}}}}}","callFunction":{"@call":"{{{{{name}}}}}","catalogId":"{{{{{ToolsId}}}}}","args":{{{{{args}}}}}}}}""");
+
+    /// <summary>
+    /// Records every message the processor sends.
+    /// </summary>
+    /// <param name="processor">The processor to listen to.</param>
+    private static List<A2UIOutboundMessage> Record(MessageProcessor processor)
+    {
+        List<A2UIOutboundMessage> sent = [];
+        processor.Outbound = m =>
+        {
+            lock (sent)
+            {
+                sent.Add(m);
+            }
+
+            return ValueTask.CompletedTask;
+        };
+        return sent;
+    }
+
+    /// <summary>
+    /// Finds the <c>rendererFunctionResponse</c> sent for a call.
+    /// </summary>
+    /// <param name="sent">The messages sent.</param>
+    /// <param name="functionCallId">The call's id.</param>
+    private static JsonObject Response(List<A2UIOutboundMessage> sent, string functionCallId) =>
+        sent.Select(m => m.Message["rendererFunctionResponse"] as JsonObject)
+            .Where(r => r?["functionCallId"]?.GetValue<string>() == functionCallId)
+            .ShouldHaveSingleItem()
+            .ShouldNotBeNull();
 
     /// <summary>
     /// Wraps a <c>createSurface</c> body in a v1.0 envelope.
