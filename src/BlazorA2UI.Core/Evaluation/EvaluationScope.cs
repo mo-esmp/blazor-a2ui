@@ -1,4 +1,4 @@
-namespace BlazorA2UI.Evaluation;
+﻿namespace BlazorA2UI.Evaluation;
 
 /// <summary>Why an expression is being evaluated, which decides what it may call.</summary>
 public enum EvaluationMode

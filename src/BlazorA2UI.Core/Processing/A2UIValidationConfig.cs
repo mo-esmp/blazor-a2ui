@@ -1,4 +1,4 @@
-namespace BlazorA2UI.Processing;
+﻿namespace BlazorA2UI.Processing;
 
 /// <summary>
 /// Completeness rules applied to each component update. A renderer normally runs without them

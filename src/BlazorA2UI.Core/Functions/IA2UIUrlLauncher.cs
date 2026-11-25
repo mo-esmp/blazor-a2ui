@@ -1,4 +1,4 @@
-namespace BlazorA2UI.Functions;
+﻿namespace BlazorA2UI.Functions;
 
 /// <summary>
 /// Opens URLs for the basic catalog's <c>openUrl</c> function. The core validates the

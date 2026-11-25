@@ -1,4 +1,4 @@
-namespace BlazorA2UI;
+﻿namespace BlazorA2UI;
 
 /// <summary>Protocol constants.</summary>
 public static class A2UIProtocol

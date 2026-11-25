@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using BlazorA2UI.Catalogs;
 using BlazorA2UI.Evaluation;
@@ -30,13 +30,13 @@ public class RoutingConformanceTests
     [MemberData(nameof(Cases))]
     public async Task Route(string name)
     {
-        var c = ConformanceData.Case(File, name);
-        var catalogs = (c["catalogs"] as JsonArray ?? []).OfType<JsonObject>().Select(BuildCatalog).ToList();
-        var processor = new MessageProcessor(catalogs);
-        var outbound = new List<JsonObject>();
-        var errors = new List<A2UIErrorReport>();
+        JsonObject c = ConformanceData.Case(File, name);
+        List<Catalog> catalogs = (c["catalogs"] as JsonArray ?? []).OfType<JsonObject>().Select(BuildCatalog).ToList();
+        MessageProcessor processor = new(catalogs);
+        List<JsonObject> outbound = new();
+        List<A2UIErrorReport> errors = new();
         processor.ErrorReported += errors.Add;
-        var surfaceSpec = c["surface"] as JsonObject ?? new JsonObject();
+        JsonObject surfaceSpec = c["surface"] as JsonObject ?? new JsonObject();
         if (surfaceSpec["outboundListener"] is not JsonValue ol || ol.GetValueKind() != JsonValueKind.False)
         {
             processor.Outbound = m =>
@@ -50,45 +50,45 @@ public class RoutingConformanceTests
             };
         }
 
-        var create = new JsonObject { ["surfaceId"] = "main" };
+        JsonObject create = new() { ["surfaceId"] = "main" };
         if (Str(surfaceSpec["catalogId"]) is { } defaultCatalog)
         {
             create["catalogId"] = defaultCatalog;
         }
 
         processor.ProcessOrThrow(new JsonObject { ["version"] = "1.0", ["createSurface"] = create });
-        var surface = processor.Surfaces["main"];
+        Surface surface = processor.Surfaces["main"];
         if (c["dataModel"] is JsonObject dm)
         {
             surface.DataModel.Set("/", dm.DeepClone());
         }
 
-        var sentCalls = new List<string>();
-        var evaluated = new List<A2UIBinding>();
+        List<string> sentCalls = new();
+        List<A2UIBinding> evaluated = new();
         surface.Changed += () =>
         {
             // Like a renderer: every binding re-evaluates when the surface changes.
-            foreach (var binding in evaluated.ToList())
+            foreach (A2UIBinding? binding in evaluated.ToList())
             {
                 binding.Refresh();
             }
         };
-        var stepIndex = 0;
-        foreach (var step in (c["steps"] as JsonArray ?? []).OfType<JsonObject>())
+        int stepIndex = 0;
+        foreach (JsonObject step in (c["steps"] as JsonArray ?? []).OfType<JsonObject>())
         {
-            var label = $"{name} step {stepIndex++}";
+            string label = $"{name} step {stepIndex++}";
             outbound.Clear();
             errors.Clear();
-            var sentBefore = sentCalls.Count;
+            int sentBefore = sentCalls.Count;
 
             if (step["evaluate"] is { } call)
             {
-                var mode = Str(step["as"]) ?? "binding";
+                string mode = Str(step["as"]) ?? "binding";
                 switch (mode)
                 {
                     case "binding":
                     case "check":
-                        var binding = new A2UIBinding(surface, call.DeepClone(), surface.RootContext, mode == "check" ? EvaluationMode.Check : EvaluationMode.Binding);
+                        A2UIBinding binding = new(surface, call.DeepClone(), surface.RootContext, mode == "check" ? EvaluationMode.Check : EvaluationMode.Binding);
                         evaluated.Add(binding);
                         binding.Refresh();
                         break;
@@ -102,8 +102,8 @@ public class RoutingConformanceTests
             }
             else if (step["respond"] is JsonObject respond)
             {
-                var index = (int)A2UIValues.ToDouble(respond["call"])!.Value;
-                var body = new JsonObject { ["functionCallId"] = sentCalls[index] };
+                int index = (int)A2UIValues.ToDouble(respond["call"])!.Value;
+                JsonObject body = new() { ["functionCallId"] = sentCalls[index] };
                 if (respond.ContainsKey("error"))
                 {
                     body["error"] = respond["error"]!.DeepClone();
@@ -136,43 +136,43 @@ public class RoutingConformanceTests
                 messages = [.. outbound];
             }
 
-            var calls = messages.Where(m => m["callAgentFunction"] is JsonObject).Select(m => m["callAgentFunction"]!.AsObject()).ToList();
-            foreach (var sent in calls)
+            List<JsonObject> calls = messages.Where(m => m["callAgentFunction"] is JsonObject).Select(m => m["callAgentFunction"]!.AsObject()).ToList();
+            foreach (JsonObject? sent in calls)
             {
                 Assert.Equal("main", Str(sent["surfaceId"]));
                 sentCalls.Add(Str(sent["functionCallId"])!);
             }
 
-            var expectedOutbound = step["expectOutbound"] as JsonArray ?? [];
-            var actualPayloads = calls.Select(m => m["callFunction"]).ToList();
+            JsonArray expectedOutbound = step["expectOutbound"] as JsonArray ?? [];
+            List<JsonNode?> actualPayloads = calls.Select(m => m["callFunction"]).ToList();
             Assert.True(expectedOutbound.Count == actualPayloads.Count,
                 $"{label}: expected {expectedOutbound.Count} outbound calls, got {actualPayloads.Count}: {string.Join(", ", actualPayloads.Select(p => p?.ToJsonString()))}");
             if (step["outboundInAnyOrder"] is JsonValue anyOrder && anyOrder.GetValueKind() == JsonValueKind.True)
             {
-                var remaining = actualPayloads.ToList();
-                foreach (var expected in expectedOutbound)
+                List<JsonNode?> remaining = actualPayloads.ToList();
+                foreach (JsonNode? expected in expectedOutbound)
                 {
-                    var match = remaining.FindIndex(a => JsonNode.DeepEquals(Normalize(expected), Normalize(a)));
+                    int match = remaining.FindIndex(a => JsonNode.DeepEquals(Normalize(expected), Normalize(a)));
                     Assert.True(match >= 0, $"{label}: no outbound call matches {expected?.ToJsonString()}");
                     remaining.RemoveAt(match);
                 }
             }
             else
             {
-                for (var i = 0; i < expectedOutbound.Count; i++)
+                for (int i = 0; i < expectedOutbound.Count; i++)
                 {
                     ConformanceAssert.Json(expectedOutbound[i], actualPayloads[i], $"{label}: outbound {i}");
                 }
             }
 
-            var expectedErrors = step["expectErrors"] as JsonArray ?? [];
+            JsonArray expectedErrors = step["expectErrors"] as JsonArray ?? [];
             Assert.True(expectedErrors.Count == errors.Count,
                 $"{label}: expected {expectedErrors.Count} errors, got {errors.Count}: {string.Join("; ", errors.Select(e => e.Code + " " + e.Message))}");
-            for (var i = 0; i < expectedErrors.Count; i++)
+            for (int i = 0; i < expectedErrors.Count; i++)
             {
-                var expected = expectedErrors[i]!.AsObject();
-                var code = Str(expected["code"]);
-                var actualCode = errors[i].Code;
+                JsonObject expected = expectedErrors[i]!.AsObject();
+                string? code = Str(expected["code"]);
+                string actualCode = errors[i].Code;
                 Assert.True(code == actualCode || code == "CATALOG_ERROR" && actualCode == A2UIErrorCodes.CatalogError,
                     $"{label}: error {i} expected {code}, got {actualCode}: {errors[i].Message}");
                 if (Str(expected["message"]) is { } message)
@@ -181,12 +181,12 @@ public class RoutingConformanceTests
                 }
             }
 
-            var actions = messages.Where(m => m["action"] is JsonObject).Select(m => m["action"]!.AsObject()).ToList();
-            var expectedActions = step["expectActions"] as JsonArray ?? [];
+            List<JsonObject> actions = messages.Where(m => m["action"] is JsonObject).Select(m => m["action"]!.AsObject()).ToList();
+            JsonArray expectedActions = step["expectActions"] as JsonArray ?? [];
             Assert.True(expectedActions.Count == actions.Count, $"{label}: expected {expectedActions.Count} actions, got {actions.Count}");
-            for (var i = 0; i < expectedActions.Count; i++)
+            for (int i = 0; i < expectedActions.Count; i++)
             {
-                var expected = expectedActions[i]!.AsObject();
+                JsonObject expected = expectedActions[i]!.AsObject();
                 Assert.Equal(Str(expected["name"]), Str(actions[i]["name"]));
                 ConformanceAssert.Json(expected["context"] ?? new JsonObject(), actions[i]["context"] ?? new JsonObject(), $"{label}: action {i} context");
                 if (expected.ContainsKey("userMessage"))
@@ -198,7 +198,7 @@ public class RoutingConformanceTests
             if (step["expectValues"] is JsonArray expectedValues)
             {
                 Assert.True(expectedValues.Count == evaluated.Count, $"{label}: expected {expectedValues.Count} values, {evaluated.Count} were evaluated");
-                for (var i = 0; i < evaluated.Count; i++)
+                for (int i = 0; i < evaluated.Count; i++)
                 {
                     ConformanceAssert.Json(expectedValues[i], Value(evaluated[i]), $"{label}: value {i}");
                 }
@@ -218,24 +218,24 @@ public class RoutingConformanceTests
 
     private static async Task Dispatch(MessageProcessor processor, Surface surface, JsonObject action)
     {
-        var definition = new ComponentDefinition("Button") { Properties = new HashSet<string> { "action" } };
-        var component = new ComponentInstance(
+        ComponentDefinition definition = new("Button") { Properties = new HashSet<string> { "action" } };
+        ComponentInstance component = new(
             "trigger",
             "Button",
-            surface.TryGetCatalog(surface.CatalogId ?? string.Empty, out var catalog) ? catalog : processor.Catalogs.Catalogs.First(),
+            surface.TryGetCatalog(surface.CatalogId ?? string.Empty, out Catalog? catalog) ? catalog : processor.Catalogs.Catalogs.First(),
             definition,
             new JsonObject { ["action"] = action },
             null,
             null,
             null,
             null);
-        var task = processor.DispatchActionAsync(surface, component, action, surface.RootContext, CancellationToken.None);
+        Task task = processor.DispatchActionAsync(surface, component, action, surface.RootContext, CancellationToken.None);
         await Task.WhenAny(task, Task.Delay(50));
     }
 
     private static async Task Settle(MessageProcessor processor)
     {
-        for (var i = 0; i < 5; i++)
+        for (int i = 0; i < 5; i++)
         {
             await Task.Yield();
             await processor.WhenIdleAsync();
@@ -245,15 +245,15 @@ public class RoutingConformanceTests
 
     private static Catalog BuildCatalog(JsonObject spec)
     {
-        var functions = new List<FunctionDefinition>();
-        foreach (var local in spec["localFunctions"] as JsonArray ?? [])
+        List<FunctionDefinition> functions = new();
+        foreach (JsonNode? local in spec["localFunctions"] as JsonArray ?? [])
         {
             functions.Add(TestCatalogs.Basic.Functions[local!.GetValue<string>()]);
         }
 
-        foreach (var (fname, declNode) in spec["agentFunctions"] as JsonObject ?? [])
+        foreach ((string fname, JsonNode? declNode) in spec["agentFunctions"] as JsonObject ?? [])
         {
-            var decl = declNode as JsonObject ?? new JsonObject();
+            JsonObject decl = declNode as JsonObject ?? new JsonObject();
             functions.Add(new FunctionDefinition(fname)
             {
                 ReturnType = Str(decl["returnType"]) ?? "any",
@@ -269,5 +269,5 @@ public class RoutingConformanceTests
     private static JsonNode? Normalize(JsonNode? node) => node is null ? null : JsonNode.Parse(node.ToJsonString());
 
     private static string? Str(JsonNode? node) =>
-        node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+        node is JsonValue v && v.TryGetValue<string>(out string? s) ? s : null;
 }

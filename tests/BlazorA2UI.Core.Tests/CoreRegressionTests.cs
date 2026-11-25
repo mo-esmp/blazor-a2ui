@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json.Nodes;
 using BlazorA2UI.Catalogs;
 using BlazorA2UI.Data;
@@ -11,12 +11,12 @@ namespace BlazorA2UI.Tests;
 /// <summary>Regression tests for behavior the conformance suites do not cover.</summary>
 public class CoreRegressionTests
 {
-    private static readonly string BasicId = BasicCatalog.Create().CatalogId;
+    private static readonly string s_basicId = BasicCatalog.Create().CatalogId;
 
     [Fact]
     public void RejectedWriteLeavesTheModelUnchanged()
     {
-        var model = new DataModel(JsonNode.Parse("""{"name":"x"}"""));
+        DataModel model = new(JsonNode.Parse("""{"name":"x"}"""));
 
         Assert.Throws<A2UIDataException>(() => model.Set("/newList/10001/value", 1));
         Assert.Throws<A2UIDataException>(() => model.Set("/name/c/d", 1));
@@ -27,7 +27,7 @@ public class CoreRegressionTests
     [Fact]
     public void WriteStillCreatesMissingContainers()
     {
-        var model = new DataModel();
+        DataModel model = new();
         model.Set("/items/1/name", "b");
         Assert.Equal("""{"items":[null,{"name":"b"}]}""", model.Snapshot()!.ToJsonString());
     }
@@ -35,16 +35,16 @@ public class CoreRegressionTests
     [Fact]
     public void FunctionCallsOnlySeeTheSurfacesCatalogs()
     {
-        var processor = new MessageProcessor([BasicCatalog.Create()]);
-        processor.ProcessOrThrow(JsonNode.Parse($$$"""{"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"{{{BasicId}}}"}}"""));
+        MessageProcessor processor = new([BasicCatalog.Create()]);
+        processor.ProcessOrThrow(JsonNode.Parse($$$"""{"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"{{{s_basicId}}}"}}"""));
 
-        var later = BasicCatalog.GetDocument();
+        JsonObject later = BasicCatalog.GetDocument();
         later["catalogId"] = "test:later";
         processor.AddCatalog(Catalog.FromJson(later));
 
-        var surface = processor.Surfaces["s"];
-        var call = JsonNode.Parse("""{"@call":"not","catalogId":"test:later","args":{"value":true}}""");
-        surface.Evaluate(call, surface.RootContext, out _, out var errors);
+        Surface surface = processor.Surfaces["s"];
+        JsonNode? call = JsonNode.Parse("""{"@call":"not","catalogId":"test:later","args":{"value":true}}""");
+        surface.Evaluate(call, surface.RootContext, out _, out IReadOnlyList<A2UIException>? errors);
 
         Assert.Contains(errors, e => e.Code == A2UIErrorCodes.CatalogError);
     }
@@ -52,23 +52,23 @@ public class CoreRegressionTests
     [Fact]
     public void RejectedCreateSurfaceIsNotPublished()
     {
-        var processor = new MessageProcessor([BasicCatalog.Create()]);
-        var bad = JsonNode.Parse($$$"""
-            {"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"{{{BasicId}}}",
+        MessageProcessor processor = new([BasicCatalog.Create()]);
+        JsonNode? bad = JsonNode.Parse($$$"""
+            {"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"{{{s_basicId}}}",
              "components":[]}}
             """);
 
         Assert.ThrowsAny<A2UIException>(() => processor.ProcessOrThrow(bad, A2UIValidationConfig.Strict));
         Assert.False(processor.Surfaces.ContainsKey("s"));
 
-        processor.ProcessOrThrow(JsonNode.Parse($$$"""{"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"{{{BasicId}}}"}}"""));
+        processor.ProcessOrThrow(JsonNode.Parse($$$"""{"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"{{{s_basicId}}}"}}"""));
         Assert.True(processor.Surfaces.ContainsKey("s"));
     }
 
     [Fact]
     public void OneOfNeedsExactlyOneMatch()
     {
-        var schema = JsonNode.Parse("""{"oneOf":[{"type":"number"},{"type":"integer"}]}""");
+        JsonNode? schema = JsonNode.Parse("""{"oneOf":[{"type":"number"},{"type":"integer"}]}""");
         Assert.NotNull(SchemaCheck.Validate(5, schema, null));
         Assert.Null(SchemaCheck.Validate(5.5, schema, null));
         Assert.NotNull(SchemaCheck.Validate("x", schema, null));
@@ -80,13 +80,13 @@ public class CoreRegressionTests
     [InlineData("""{"label":42}""")]
     public void StrictValidationChecksAccessibilityValues(string accessibility)
     {
-        var processor = new MessageProcessor([BasicCatalog.Create()]);
-        var message = JsonNode.Parse($$$"""
-            {"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"{{{BasicId}}}",
+        MessageProcessor processor = new([BasicCatalog.Create()]);
+        JsonNode? message = JsonNode.Parse($$$"""
+            {"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"{{{s_basicId}}}",
              "components":[{"id":"root","component":"Text","text":"hi","@accessibility":{{{accessibility}}}}]}}
             """);
 
-        var errors = new List<A2UIErrorReport>();
+        List<A2UIErrorReport> errors = new();
         processor.ErrorReported += errors.Add;
         processor.ProcessOrThrow(message, A2UIValidationConfig.Strict);
 
@@ -96,12 +96,12 @@ public class CoreRegressionTests
     [Fact]
     public void ValidAccessibilityPassesStrictValidation()
     {
-        var processor = new MessageProcessor([BasicCatalog.Create()]);
-        var errors = new List<A2UIErrorReport>();
+        MessageProcessor processor = new([BasicCatalog.Create()]);
+        List<A2UIErrorReport> errors = new();
         processor.ErrorReported += errors.Add;
         processor.ProcessOrThrow(
             JsonNode.Parse($$$"""
-                {"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"{{{BasicId}}}",
+                {"version":"1.0","createSurface":{"surfaceId":"s","catalogId":"{{{s_basicId}}}",
                  "components":[{"id":"root","component":"Text","text":"hi",
                    "@accessibility":{"label":"Greeting","live":"polite","hidden":{"@path":"/hide"} } } ]} }
                 """),

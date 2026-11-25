@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace BlazorA2UI.Data;
 
@@ -9,22 +9,22 @@ namespace BlazorA2UI.Data;
 /// </summary>
 public static class JsonPointer
 {
-    private static readonly HashSet<string> ForbiddenSegments = ["__proto__", "constructor", "prototype"];
+    private static readonly HashSet<string> s_forbiddenSegments = ["__proto__", "constructor", "prototype"];
 
     /// <summary>Splits a pointer into unescaped segments. The root is an empty list.</summary>
     public static IReadOnlyList<string> Parse(string pointer)
     {
         ArgumentNullException.ThrowIfNull(pointer);
-        var segments = new List<string>();
-        foreach (var raw in pointer.Split('/'))
+        List<string> segments = new();
+        foreach (string raw in pointer.Split('/'))
         {
             if (raw.Length == 0)
             {
                 continue;
             }
 
-            var segment = Unescape(raw);
-            if (ForbiddenSegments.Contains(segment))
+            string segment = Unescape(raw);
+            if (s_forbiddenSegments.Contains(segment))
             {
                 throw new A2UIDataException($"Forbidden path segment '{segment}' in '{pointer}'.");
             }
@@ -38,8 +38,8 @@ public static class JsonPointer
     /// <summary>Builds a canonical pointer from unescaped segments.</summary>
     public static string Format(IEnumerable<string> segments)
     {
-        var sb = new StringBuilder();
-        foreach (var segment in segments)
+        StringBuilder sb = new();
+        foreach (string segment in segments)
         {
             sb.Append('/').Append(Escape(segment));
         }
@@ -62,13 +62,13 @@ public static class JsonPointer
             return Normalize(path);
         }
 
-        var context = string.IsNullOrEmpty(contextPath) ? "/" : contextPath;
+        string context = string.IsNullOrEmpty(contextPath) ? "/" : contextPath;
         if (path.Length == 0 || path == ".")
         {
             return Normalize(context);
         }
 
-        var segments = new List<string>(Parse(context));
+        List<string> segments = new(Parse(context));
         segments.AddRange(Parse(path));
         return Format(segments);
     }
@@ -81,7 +81,7 @@ public static class JsonPointer
             return false;
         }
 
-        for (var i = 0; i < ancestor.Count; i++)
+        for (int i = 0; i < ancestor.Count; i++)
         {
             if (!string.Equals(ancestor[i], path[i], StringComparison.Ordinal))
             {

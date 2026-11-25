@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using BlazorA2UI.Catalogs;
 using BlazorA2UI.Expressions;
@@ -43,30 +43,30 @@ public sealed class A2UIEvaluator
                 case JsonValue v:
                     return v.DeepClone();
                 case JsonArray arr:
-                {
-                    var result = new JsonArray();
-                    foreach (var item in arr)
                     {
-                        result.Add(await EvaluateAsync(item, context, scope).ConfigureAwait(false));
-                    }
+                        JsonArray result = new();
+                        foreach (JsonNode? item in arr)
+                        {
+                            result.Add(await EvaluateAsync(item, context, scope).ConfigureAwait(false));
+                        }
 
-                    return result;
-                }
+                        return result;
+                    }
 
                 case JsonObject obj when obj.ContainsKey("@path"):
                     return ResolveBinding(obj, context);
                 case JsonObject obj when obj.ContainsKey("@call"):
                     return await CallAsync(obj, context, scope).ConfigureAwait(false);
                 case JsonObject obj:
-                {
-                    var result = new JsonObject();
-                    foreach (var (key, child) in obj)
                     {
-                        result[UnescapeKey(key)] = await EvaluateAsync(child, context, scope).ConfigureAwait(false);
-                    }
+                        JsonObject result = new();
+                        foreach ((string key, JsonNode? child) in obj)
+                        {
+                            result[UnescapeKey(key)] = await EvaluateAsync(child, context, scope).ConfigureAwait(false);
+                        }
 
-                    return result;
-                }
+                        return result;
+                    }
 
                 default:
                     return null;
@@ -84,7 +84,7 @@ public sealed class A2UIEvaluator
     /// </summary>
     public JsonNode? Evaluate(JsonNode? value, EvaluationContext context, EvaluationScope scope, Action? onSettled = null)
     {
-        var task = EvaluateAsync(value, context, scope);
+        ValueTask<JsonNode?> task = EvaluateAsync(value, context, scope);
         if (task.IsCompleted)
         {
             return task.GetAwaiter().GetResult();
@@ -137,14 +137,14 @@ public sealed class A2UIEvaluator
             throw new A2UIExpressionException("A data binding object may only contain '@path'.");
         }
 
-        var path = A2UIValues.AsString(binding["@path"])
+        string path = A2UIValues.AsString(binding["@path"])
                    ?? throw new A2UIExpressionException("'@path' must be a string.");
-        return context.Data.TryGet(context.Resolve(path), out var value) ? value?.DeepClone() : null;
+        return context.Data.TryGet(context.Resolve(path), out JsonNode? value) ? value?.DeepClone() : null;
     }
 
     private async ValueTask<JsonNode?> CallAsync(JsonObject call, EvaluationContext context, EvaluationScope scope)
     {
-        foreach (var (key, _) in call)
+        foreach ((string key, JsonNode? _) in call)
         {
             if (key is not ("@call" or "catalogId" or "args"))
             {
@@ -152,13 +152,13 @@ public sealed class A2UIEvaluator
             }
         }
 
-        var name = A2UIValues.AsString(call["@call"]);
+        string? name = A2UIValues.AsString(call["@call"]);
         if (string.IsNullOrEmpty(name))
         {
             throw new A2UIExpressionException("'@call' must be a non-empty string.");
         }
 
-        var rawArgs = call["args"];
+        JsonNode? rawArgs = call["args"];
         if (rawArgs is not null and not JsonObject)
         {
             throw new A2UIExpressionException($"The args of '{name}' must be an object.");
@@ -183,18 +183,18 @@ public sealed class A2UIEvaluator
                     $"The call to '{name}' names no catalogId and its surface has no default catalogId.");
         }
 
-        if (!TryGetCatalog(context, catalogId, out var catalog))
+        if (!TryGetCatalog(context, catalogId, out Catalog? catalog))
         {
             throw scope.Mode == EvaluationMode.AgentCall
                 ? new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Catalog '{catalogId}' is not registered on this renderer.")
                 : new A2UICatalogException($"Catalog not found: {catalogId}");
         }
 
-        catalog.Functions.TryGetValue(name, out var definition);
+        catalog.Functions.TryGetValue(name, out FunctionDefinition? definition);
         CheckBoundaries(name, definition, scope);
 
-        var pendingBefore = scope.Pending;
-        var argsPending = false;
+        bool pendingBefore = scope.Pending;
+        bool argsPending = false;
         scope.Pending = false;
         JsonObject args;
         try
@@ -215,11 +215,11 @@ public sealed class A2UIEvaluator
 
         if (definition?.Implementation is { } implementation)
         {
-            var invocation = new FunctionInvocation(name, catalog.CatalogId, args, context, scope, this);
+            FunctionInvocation invocation = new(name, catalog.CatalogId, args, context, scope, this);
             if (name == "formatString")
             {
                 // Calls inside ${...} resolve against the catalog this call resolved to.
-                var previous = scope.CatalogOverride;
+                string? previous = scope.CatalogOverride;
                 scope.CatalogOverride = catalog.CatalogId;
                 try
                 {
@@ -244,7 +244,7 @@ public sealed class A2UIEvaluator
             throw new A2UIExpressionException($"Function '{name}' in a formatString template has no local implementation.");
         }
 
-        var router = context.Surface?.AgentRouter
+        IAgentFunctionRouter router = context.Surface?.AgentRouter
                      ?? throw new A2UIExpressionException($"Function '{name}' has no local implementation and there is no agent to route it to.");
         if (HasNonFiniteNumber(args, 0))
         {
@@ -253,7 +253,7 @@ public sealed class A2UIEvaluator
 
         if (scope.IsReactive)
         {
-            var value = router.GetOrStart(catalog.CatalogId, name, args, scope.RequestedAgentCalls, out var pending);
+            JsonNode? value = router.GetOrStart(catalog.CatalogId, name, args, scope.RequestedAgentCalls, out bool pending);
             if (pending)
             {
                 scope.Pending = true;
@@ -267,8 +267,8 @@ public sealed class A2UIEvaluator
 
     private static bool HasNonFiniteNumber(JsonNode? node, int depth) => depth <= MaxDepth && node switch
     {
-        JsonValue v when v.TryGetValue<double>(out var d) => !double.IsFinite(d),
-        JsonValue v when v.TryGetValue<float>(out var f) => !float.IsFinite(f),
+        JsonValue v when v.TryGetValue<double>(out double d) => !double.IsFinite(d),
+        JsonValue v when v.TryGetValue<float>(out float f) => !float.IsFinite(f),
         JsonObject o => o.Any(p => HasNonFiniteNumber(p.Value, depth + 1)),
         JsonArray a => a.Any(i => HasNonFiniteNumber(i, depth + 1)),
         _ => false,
@@ -320,7 +320,7 @@ public sealed class A2UIEvaluator
         EvaluationContext context,
         EvaluationScope scope)
     {
-        var args = new JsonObject();
+        JsonObject args = new();
         if (rawArgs is not null)
         {
             if (scope.Mode == EvaluationMode.AgentCall)
@@ -329,7 +329,7 @@ public sealed class A2UIEvaluator
                 PreflightNestedCalls(rawArgs, catalog, context, 0);
             }
 
-            foreach (var (key, raw) in rawArgs)
+            foreach ((string key, JsonNode? raw) in rawArgs)
             {
                 args[UnescapeKey(key)] = await EvaluateAsync(raw, context, scope).ConfigureAwait(false);
             }
@@ -338,10 +338,10 @@ public sealed class A2UIEvaluator
         if (definition?.ArgsSchema is { } schema)
         {
             ArgsSchema.ApplyDefaultsAndCoerce(schema, args);
-            var problem = ArgsSchema.Validate(schema, args);
+            string? problem = ArgsSchema.Validate(schema, args);
             if (problem is not null)
             {
-                var message = $"Validation failed for function '{name}': {problem}";
+                string message = $"Validation failed for function '{name}': {problem}";
                 throw scope.Mode == EvaluationMode.AgentCall
                     ? new A2UIException(A2UIErrorCodes.InvalidFunctionCall, message)
                     : new A2UIExpressionException(message);
@@ -370,24 +370,24 @@ public sealed class A2UIEvaluator
             case JsonObject obj:
                 if (A2UIValues.AsString(obj["@call"]) is { } nested && !nested.StartsWith('@'))
                 {
-                    var catalog = defaultCatalog;
+                    Catalog? catalog = defaultCatalog;
                     if (A2UIValues.AsString(obj["catalogId"]) is { } id && !TryGetCatalog(context, id, out catalog))
                     {
                         throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Catalog '{id}' is not registered on this renderer.");
                     }
 
-                    catalog.Functions.TryGetValue(nested, out var definition);
+                    catalog.Functions.TryGetValue(nested, out FunctionDefinition? definition);
                     CheckBoundaries(nested, definition, new EvaluationScope(EvaluationMode.AgentCall));
                 }
 
-                foreach (var (_, child) in obj)
+                foreach ((string _, JsonNode? child) in obj)
                 {
                     PreflightNestedCalls(child, defaultCatalog, context, depth + 1);
                 }
 
                 break;
             case JsonArray arr:
-                foreach (var item in arr)
+                foreach (JsonNode? item in arr)
                 {
                     PreflightNestedCalls(item, defaultCatalog, context, depth + 1);
                 }
@@ -429,7 +429,7 @@ public sealed class A2UIEvaluator
 
         if (!context.InCollectionScope)
         {
-            var message = "@index function can only be evaluated inside a collection template iteration scope.";
+            string message = "@index function can only be evaluated inside a collection template iteration scope.";
             throw scope.Mode == EvaluationMode.AgentCall
                 ? new A2UIException(A2UIErrorCodes.ExecutionError, message)
                 : new A2UIExpressionException(message);
@@ -438,7 +438,7 @@ public sealed class A2UIEvaluator
         double offset = 0;
         if (rawArgs is not null)
         {
-            foreach (var (key, _) in rawArgs)
+            foreach ((string key, JsonNode? _) in rawArgs)
             {
                 if (key != "offset")
                 {
@@ -446,7 +446,7 @@ public sealed class A2UIEvaluator
                 }
             }
 
-            var offsetValue = await EvaluateAsync(rawArgs["offset"], context, scope).ConfigureAwait(false);
+            JsonNode? offsetValue = await EvaluateAsync(rawArgs["offset"], context, scope).ConfigureAwait(false);
             if (offsetValue is not null)
             {
                 offset = A2UIValues.ToDouble(offsetValue) is { } o && offsetValue.GetValueKind() == JsonValueKind.Number

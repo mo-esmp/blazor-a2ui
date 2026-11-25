@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using BlazorA2UI.Evaluation;
@@ -17,9 +17,9 @@ internal static class SchemaCheck
     private const string CommonTypesName = "common_types.json";
     private const int MaxDepth = 64;
 
-    private static readonly Lazy<JsonObject> CommonTypes = new(() =>
+    private static readonly Lazy<JsonObject> s_commonTypes = new(() =>
     {
-        using var stream = typeof(SchemaCheck).Assembly.GetManifestResourceStream("BlazorA2UI.Schemas.common_types.json")
+        using Stream stream = typeof(SchemaCheck).Assembly.GetManifestResourceStream("BlazorA2UI.Schemas.common_types.json")
                            ?? throw new InvalidOperationException("The embedded common_types.json schema is missing.");
         return (JsonObject)JsonNode.Parse(stream)!;
     });
@@ -50,7 +50,7 @@ internal static class SchemaCheck
                 return null;
         }
 
-        var schema = (JsonObject)schemaNode;
+        JsonObject schema = (JsonObject)schemaNode;
 
         if (A2UIValues.AsString(schema["$ref"]) is { } reference)
         {
@@ -65,7 +65,7 @@ internal static class SchemaCheck
             {
                 // Function-specific argument schemas are checked where the call is resolved.
             }
-            else if (Resolve(reference, document, out var target, out var targetDocument))
+            else if (Resolve(reference, document, out JsonNode? target, out JsonObject? targetDocument))
             {
                 if (Check(value, target, targetDocument, depth + 1) is { } problem)
                 {
@@ -101,7 +101,7 @@ internal static class SchemaCheck
 
         if (value is JsonValue v && v.GetValueKind() == JsonValueKind.String)
         {
-            var s = v.GetValue<string>();
+            string s = v.GetValue<string>();
             if (A2UIValues.AsString(schema["pattern"]) is { } pattern && !PatternMatches(pattern, s))
             {
                 return $"'{s}' does not match the required pattern";
@@ -110,7 +110,7 @@ internal static class SchemaCheck
 
         if (value is JsonValue n && n.GetValueKind() == JsonValueKind.Number)
         {
-            var d = A2UIValues.ToDouble(n) ?? 0;
+            double d = A2UIValues.ToDouble(n) ?? 0;
             if (A2UIValues.ToDouble(schema["minimum"]) is { } min && d < min)
             {
                 return $"{d} is below the minimum {min}";
@@ -124,7 +124,7 @@ internal static class SchemaCheck
 
         if (schema["allOf"] is JsonArray all)
         {
-            foreach (var part in all)
+            foreach (JsonNode? part in all)
             {
                 if (Check(value, part, document, depth + 1) is { } problem)
                 {
@@ -133,16 +133,16 @@ internal static class SchemaCheck
             }
         }
 
-        foreach (var combiner in new[] { "anyOf", "oneOf" })
+        foreach (string? combiner in new[] { "anyOf", "oneOf" })
         {
             if (schema[combiner] is JsonArray branches && branches.Count > 0)
             {
-                var exactlyOne = combiner == "oneOf";
+                bool exactlyOne = combiner == "oneOf";
                 string? first = null;
-                var matches = 0;
-                foreach (var branch in branches)
+                int matches = 0;
+                foreach (JsonNode? branch in branches)
                 {
-                    var problem = Check(value, branch, document, depth + 1);
+                    string? problem = Check(value, branch, document, depth + 1);
                     if (problem is null)
                     {
                         matches++;
@@ -179,12 +179,12 @@ internal static class SchemaCheck
 
     private static string? ObjectProblem(JsonObject obj, JsonObject schema, JsonObject document, int depth)
     {
-        var props = schema["properties"] as JsonObject;
+        JsonObject? props = schema["properties"] as JsonObject;
         if (schema["required"] is JsonArray required)
         {
-            foreach (var r in required)
+            foreach (JsonNode? r in required)
             {
-                var key = A2UIValues.AsString(r);
+                string? key = A2UIValues.AsString(r);
                 if (key is not null && !obj.ContainsKey(key))
                 {
                     return $"missing required '{key}'";
@@ -192,7 +192,7 @@ internal static class SchemaCheck
             }
         }
 
-        foreach (var (key, value) in obj)
+        foreach ((string key, JsonNode? value) in obj)
         {
             if (props?[key] is { } propSchema)
             {
@@ -234,7 +234,7 @@ internal static class SchemaCheck
     /// <summary>Keys declared by a schema and the parts it combines (for <c>unevaluatedProperties</c>).</summary>
     private static HashSet<string> DeclaredKeys(JsonObject schema, JsonObject document, int depth)
     {
-        var keys = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string> keys = new(StringComparer.Ordinal);
         if (depth > 16)
         {
             return keys;
@@ -246,14 +246,14 @@ internal static class SchemaCheck
         }
 
         if (A2UIValues.AsString(schema["$ref"]) is { } reference
-            && Resolve(reference, document, out var target, out var targetDocument) && target is JsonObject targetSchema)
+            && Resolve(reference, document, out JsonNode? target, out JsonObject? targetDocument) && target is JsonObject targetSchema)
         {
             keys.UnionWith(DeclaredKeys(targetSchema, targetDocument, depth + 1));
         }
 
-        foreach (var combiner in new[] { "allOf", "anyOf", "oneOf" })
+        foreach (string? combiner in new[] { "allOf", "anyOf", "oneOf" })
         {
-            foreach (var part in (schema[combiner] as JsonArray ?? []).OfType<JsonObject>())
+            foreach (JsonObject part in (schema[combiner] as JsonArray ?? []).OfType<JsonObject>())
             {
                 keys.UnionWith(DeclaredKeys(part, document, depth + 1));
             }
@@ -276,7 +276,7 @@ internal static class SchemaCheck
 
         if (schema["items"] is JsonObject items)
         {
-            for (var i = 0; i < arr.Count; i++)
+            for (int i = 0; i < arr.Count; i++)
             {
                 if (Check(arr[i], items, document, depth + 1) is { } problem)
                 {
@@ -292,12 +292,12 @@ internal static class SchemaCheck
     {
         target = null;
         targetDocument = document;
-        var hash = reference.IndexOf('#');
-        var file = hash < 0 ? reference : reference[..hash];
-        var pointer = hash < 0 ? string.Empty : reference[(hash + 1)..];
+        int hash = reference.IndexOf('#');
+        string file = hash < 0 ? reference : reference[..hash];
+        string pointer = hash < 0 ? string.Empty : reference[(hash + 1)..];
         if (file.EndsWith(CommonTypesName, StringComparison.Ordinal))
         {
-            targetDocument = CommonTypes.Value;
+            targetDocument = s_commonTypes.Value;
         }
         else if (file.Length > 0)
         {
@@ -305,7 +305,7 @@ internal static class SchemaCheck
         }
 
         JsonNode? node = targetDocument;
-        foreach (var segment in pointer.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        foreach (string segment in pointer.Split('/', StringSplitOptions.RemoveEmptyEntries))
         {
             node = (node as JsonObject)?[segment.Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal)];
             if (node is null)
@@ -321,7 +321,7 @@ internal static class SchemaCheck
     private static bool TypeMatches(JsonNode? value, JsonNode type) => type switch
     {
         JsonArray types => types.Any(t => TypeMatches(value, t!)),
-        JsonValue t when t.TryGetValue<string>(out var name) => name switch
+        JsonValue t when t.TryGetValue<string>(out string? name) => name switch
         {
             "string" => value is JsonValue v && v.GetValueKind() == JsonValueKind.String,
             "number" => value is JsonValue v && v.GetValueKind() == JsonValueKind.Number,

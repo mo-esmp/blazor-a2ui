@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace BlazorA2UI.Evaluation;
@@ -17,7 +17,7 @@ internal static class ArgsSchema
             return;
         }
 
-        foreach (var (name, propNode) in props)
+        foreach ((string name, JsonNode? propNode) in props)
         {
             if (propNode is not JsonObject prop)
             {
@@ -46,8 +46,8 @@ internal static class ArgsSchema
             }
             else if (prop["items"] is JsonObject items && IsRef(items, "DynamicBoolean") && args[name] is JsonArray arr)
             {
-                var coerced = new JsonArray();
-                foreach (var item in arr)
+                JsonArray coerced = new();
+                foreach (JsonNode? item in arr)
                 {
                     coerced.Add(A2UIValues.ToBoolean(item));
                 }
@@ -68,14 +68,14 @@ internal static class ArgsSchema
             return null;
         }
 
-        foreach (var (name, value) in args)
+        foreach ((string name, JsonNode? value) in args)
         {
             if (props[name] is not JsonObject prop || IsDynamic(value))
             {
                 continue;
             }
 
-            var coerced = IsRef(prop, "DynamicBoolean") ? A2UIValues.ToBoolean(value) : value;
+            JsonNode? coerced = IsRef(prop, "DynamicBoolean") ? A2UIValues.ToBoolean(value) : value;
             if (CheckValue(prop, coerced, name, literal: true) is { } problem)
             {
                 return (name, problem);
@@ -95,12 +95,12 @@ internal static class ArgsSchema
     /// <summary>Returns a description of the first problem, or null when the arguments are valid.</summary>
     public static string? Validate(JsonObject schema, JsonObject args)
     {
-        var props = schema["properties"] as JsonObject;
+        JsonObject? props = schema["properties"] as JsonObject;
         if (schema["required"] is JsonArray required)
         {
-            foreach (var r in required)
+            foreach (JsonNode? r in required)
             {
-                var key = r!.GetValue<string>();
+                string key = r!.GetValue<string>();
                 if (!args.ContainsKey(key))
                 {
                     return $"missing required argument '{key}'";
@@ -108,13 +108,13 @@ internal static class ArgsSchema
             }
         }
 
-        var closed = schema["additionalProperties"] is JsonValue ap && ap.GetValueKind() == JsonValueKind.False
+        bool closed = schema["additionalProperties"] is JsonValue ap && ap.GetValueKind() == JsonValueKind.False
                      || schema["unevaluatedProperties"] is JsonValue up && up.GetValueKind() == JsonValueKind.False;
-        foreach (var (key, value) in args)
+        foreach ((string key, JsonNode? value) in args)
         {
             if (props?[key] is JsonObject prop)
             {
-                var problem = CheckValue(prop, value, key);
+                string? problem = CheckValue(prop, value, key);
                 if (problem is not null)
                 {
                     return problem;
@@ -138,10 +138,10 @@ internal static class ArgsSchema
             return null;
         }
 
-        var kind = value.GetValueKind();
+        JsonValueKind kind = value.GetValueKind();
         if (prop["type"] is JsonValue t)
         {
-            var ok = t.GetValue<string>() switch
+            bool ok = t.GetValue<string>() switch
             {
                 "string" => kind == JsonValueKind.String,
                 "number" => kind == JsonValueKind.Number,

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using BlazorA2UI.Catalogs;
 using BlazorA2UI.Data;
@@ -26,28 +26,28 @@ public class ConformanceTests
     [MemberData(nameof(DataModelCases))]
     public void DataModel(string name)
     {
-        var c = ConformanceData.Case("data_model.yaml", name);
-        var model = new DataModel(c["initial"]);
-        var notified = new List<string>();
-        var subscriptions = new List<IDisposable>();
-        foreach (var watch in (c["watch"] as JsonArray ?? []).Select(w => w!.GetValue<string>()))
+        JsonObject c = ConformanceData.Case("data_model.yaml", name);
+        DataModel model = new(c["initial"]);
+        List<string> notified = new();
+        List<IDisposable> subscriptions = new();
+        foreach (string? watch in (c["watch"] as JsonArray ?? []).Select(w => w!.GetValue<string>()))
         {
             subscriptions.Add(model.Observe(watch, () => notified.Add(watch)));
         }
 
         JsonNode? lastInput = null;
-        foreach (var step in c["steps"]!.AsArray().OfType<JsonObject>())
+        foreach (JsonObject step in c["steps"]!.AsArray().OfType<JsonObject>())
         {
             notified.Clear();
-            var op = Str(step["op"]);
-            var path = Str(step["path"]) ?? "/";
+            string? op = Str(step["op"]);
+            string path = Str(step["path"]) ?? "/";
             Exception? error = null;
             try
             {
                 switch (op)
                 {
                     case "get":
-                        var found = model.TryGet(path, out var value);
+                        bool found = model.TryGet(path, out JsonNode? value);
                         if (step["expect_absent"] is not null)
                         {
                             Assert.True(!found || value is null, $"{name}: expected {path} absent, got {value?.ToJsonString()}");
@@ -102,7 +102,7 @@ public class ConformanceTests
 
             if (step["expect_values"] is JsonObject expectedValues)
             {
-                foreach (var (p, v) in expectedValues)
+                foreach ((string p, JsonNode? v) in expectedValues)
                 {
                     AssertJson(v, model.Get(p), $"{name}: value at {p}");
                 }
@@ -118,8 +118,8 @@ public class ConformanceTests
     [MemberData(nameof(DataContextCases))]
     public void ResolvePath(string name)
     {
-        var c = ConformanceData.Case("data_context.yaml", name);
-        var args = c["args"]!.AsObject();
+        JsonObject c = ConformanceData.Case("data_context.yaml", name);
+        JsonObject args = c["args"]!.AsObject();
         Assert.Equal(Str(c["expect"]), JsonPointer.Resolve(Str(args["path"])!, Str(args["contextPath"])));
     }
 
@@ -131,8 +131,8 @@ public class ConformanceTests
     [MemberData(nameof(ExpressionCases))]
     public void ParseExpression(string name)
     {
-        var c = ConformanceData.Case("expressions.yaml", name);
-        var input = Str(c["input"])!;
+        JsonObject c = ConformanceData.Case("expressions.yaml", name);
+        string input = Str(c["input"])!;
         if (c["expect_error"] is JsonObject expectedError)
         {
             Exception? error = null;
@@ -149,7 +149,7 @@ public class ConformanceTests
             return;
         }
 
-        var parts = ExpressionParser.Parse(input);
+        List<JsonNode?> parts = ExpressionParser.Parse(input);
         AssertJson(c["expect"], new JsonArray(parts.Select(ToConformanceShape).ToArray()), name);
     }
 
@@ -175,9 +175,9 @@ public class ConformanceTests
     [MemberData(nameof(FunctionCases))]
     public async Task EvaluateFunction(string name)
     {
-        var c = ConformanceData.Case("functions.yaml", name);
-        var function = Str(c["function"])!;
-        var args = c["args"]?.DeepClone() as JsonObject ?? new JsonObject();
+        JsonObject c = ConformanceData.Case("functions.yaml", name);
+        string function = Str(c["function"])!;
+        JsonObject args = c["args"]?.DeepClone() as JsonObject ?? new JsonObject();
         JsonNode? result = null;
         Exception? error = null;
         try
@@ -188,10 +188,10 @@ public class ConformanceTests
             }
             else
             {
-                var catalog = TestCatalogs.Basic;
-                var call = new JsonObject { ["@call"] = function, ["catalogId"] = catalog.CatalogId, ["args"] = args };
-                var evaluator = new A2UIEvaluator(new CatalogRegistry([catalog]));
-                var scope = new EvaluationScope(function == "openUrl" ? EvaluationMode.Action : EvaluationMode.Binding);
+                Catalog catalog = TestCatalogs.Basic;
+                JsonObject call = new() { ["@call"] = function, ["catalogId"] = catalog.CatalogId, ["args"] = args };
+                A2UIEvaluator evaluator = new(new CatalogRegistry([catalog]));
+                EvaluationScope scope = new(function == "openUrl" ? EvaluationMode.Action : EvaluationMode.Binding);
                 result = await evaluator.EvaluateAsync(call, EvaluationContext.Detached(), scope);
             }
         }
@@ -207,7 +207,7 @@ public class ConformanceTests
         }
 
         Assert.Null(error);
-        var expected = c["expect"];
+        JsonNode? expected = c["expect"];
         if (expected is JsonValue ev && ev.GetValueKind() is JsonValueKind.True or JsonValueKind.False && result is JsonObject vr)
         {
             // v0.9-style boolean expectations against a v1.0 ValidationResult.
@@ -217,7 +217,7 @@ public class ConformanceTests
 
         if (expected is JsonObject expectedObject && result is JsonObject actualObject)
         {
-            foreach (var (k, v) in expectedObject)
+            foreach ((string k, JsonNode? v) in expectedObject)
             {
                 AssertJson(v, actualObject[k], $"{name}: {k}");
             }
@@ -230,15 +230,15 @@ public class ConformanceTests
 
     private static List<Catalog> LoadCatalogPaths(JsonObject c)
     {
-        var catalogs = new List<Catalog>();
+        List<Catalog> catalogs = new();
         if (c["catalogPaths"] is not JsonArray paths)
         {
             return [TestCatalogs.Basic];
         }
 
-        foreach (var p in paths)
+        foreach (JsonNode? p in paths)
         {
-            var path = p!.GetValue<string>();
+            string path = p!.GetValue<string>();
             if (path.StartsWith("catalogs/basic/", StringComparison.Ordinal))
             {
                 if (!path.StartsWith("catalogs/basic/v1/", StringComparison.Ordinal))
@@ -250,7 +250,7 @@ public class ConformanceTests
             }
             else
             {
-                var file = Path.Combine(AppContext.BaseDirectory, "Conformance", "data", "catalogs", Path.GetFileName(path));
+                string file = Path.Combine(AppContext.BaseDirectory, "Conformance", "data", "catalogs", Path.GetFileName(path));
                 catalogs.Add(Catalog.FromJson(File.ReadAllText(file)));
             }
         }
@@ -260,9 +260,9 @@ public class ConformanceTests
 
     private static async Task<JsonNode?> EvaluateOnSurface(JsonObject c, string function, JsonObject args)
     {
-        var surfaceSpec = c["surface"] as JsonObject;
-        var catalogs = LoadCatalogPaths(c);
-        var agentFunctions = new List<FunctionDefinition>();
+        JsonObject? surfaceSpec = c["surface"] as JsonObject;
+        List<Catalog> catalogs = LoadCatalogPaths(c);
+        List<FunctionDefinition> agentFunctions = new();
         if (function == "readSessionToken" && c["catalogPaths"] is null)
         {
             agentFunctions.Add(new FunctionDefinition("readSessionToken") { AllowedCallers = AllowedCallers.AgentOnly, ReturnType = "string" });
@@ -273,8 +273,8 @@ public class ConformanceTests
             catalogs[0] = catalogs[0].Extend(functions: agentFunctions);
         }
 
-        var processor = new MessageProcessor(catalogs);
-        var create = new JsonObject { ["surfaceId"] = "main" };
+        MessageProcessor processor = new(catalogs);
+        JsonObject create = new() { ["surfaceId"] = "main" };
         if (Str(surfaceSpec?["catalogId"]) is { } surfaceCatalog)
         {
             create["catalogId"] = surfaceCatalog;
@@ -286,13 +286,13 @@ public class ConformanceTests
             processor.Surfaces["main"].DataModel.Set("/", dm);
         }
 
-        var call = new JsonObject { ["@call"] = function, ["args"] = args };
+        JsonObject call = new() { ["@call"] = function, ["args"] = args };
         if (Str(c["catalogId"]) is { } callCatalog)
         {
             call["catalogId"] = callCatalog;
         }
 
-        var surface = processor.Surfaces["main"];
+        Surface surface = processor.Surfaces["main"];
         return await processor.Evaluator.EvaluateAsync(call, surface.RootContext, new EvaluationScope(EvaluationMode.Binding));
     }
 

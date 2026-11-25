@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace BlazorA2UI.Text;
 
@@ -19,8 +19,8 @@ public static class Uax31
             return false;
         }
 
-        var first = true;
-        foreach (var rune in value.EnumerateRunes())
+        bool first = true;
+        foreach (Rune rune in value.EnumerateRunes())
         {
             if (first)
             {
@@ -40,16 +40,16 @@ public static class Uax31
         return true;
     }
 
-    public static bool IsXidStart(Rune rune) => InRanges(Uax31Tables.XidStart, rune.Value);
+    public static bool IsXidStart(Rune rune) => InRanges(Uax31Tables.s_xidStart, rune.Value);
 
-    public static bool IsXidContinue(Rune rune) => InRanges(Uax31Tables.XidContinue, rune.Value);
+    public static bool IsXidContinue(Rune rune) => InRanges(Uax31Tables.s_xidContinue, rune.Value);
 
     private static bool InRanges(int[] ranges, int value)
     {
         int lo = 0, hi = (ranges.Length / 2) - 1;
         while (lo <= hi)
         {
-            var mid = (lo + hi) >>> 1;
+            int mid = (lo + hi) >>> 1;
             if (value < ranges[2 * mid])
             {
                 hi = mid - 1;

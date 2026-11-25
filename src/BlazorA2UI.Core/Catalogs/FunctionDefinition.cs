@@ -1,4 +1,4 @@
-using System.Text.Json.Nodes;
+﻿using System.Text.Json.Nodes;
 using BlazorA2UI.Evaluation;
 
 namespace BlazorA2UI.Catalogs;

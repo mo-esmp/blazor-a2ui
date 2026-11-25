@@ -1,4 +1,4 @@
-namespace BlazorA2UI.Catalogs;
+﻿namespace BlazorA2UI.Catalogs;
 
 /// <summary>The catalogs a renderer supports, by id. All must target the same protocol version.</summary>
 public sealed class CatalogRegistry
@@ -7,7 +7,7 @@ public sealed class CatalogRegistry
 
     public CatalogRegistry(IEnumerable<Catalog>? catalogs = null)
     {
-        foreach (var catalog in catalogs ?? [])
+        foreach (Catalog catalog in catalogs ?? [])
         {
             Add(catalog);
         }
@@ -28,7 +28,7 @@ public sealed class CatalogRegistry
     public bool TryGet(string catalogId, out Catalog catalog) => _catalogs.TryGetValue(catalogId, out catalog!);
 
     /// <summary>Returns the catalog, or throws a catalog error naming it.</summary>
-    public Catalog Get(string catalogId) => TryGet(catalogId, out var catalog)
+    public Catalog Get(string catalogId) => TryGet(catalogId, out Catalog? catalog)
         ? catalog
         : throw new A2UICatalogException($"Catalog '{catalogId}' is not available on this renderer.");
 }

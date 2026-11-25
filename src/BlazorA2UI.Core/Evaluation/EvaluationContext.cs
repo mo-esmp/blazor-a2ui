@@ -1,4 +1,4 @@
-using BlazorA2UI.Data;
+﻿using BlazorA2UI.Data;
 using BlazorA2UI.Processing;
 
 namespace BlazorA2UI.Evaluation;
@@ -40,8 +40,8 @@ public sealed class EvaluationContext
     /// <summary>Returns the scope of one item of a template list bound at <paramref name="listPath"/>.</summary>
     public EvaluationContext ForTemplateItem(string listPath, int index)
     {
-        var absoluteList = JsonPointer.Resolve(listPath, Path);
-        var itemPath = JsonPointer.Resolve(index.ToString(System.Globalization.CultureInfo.InvariantCulture), absoluteList);
+        string absoluteList = JsonPointer.Resolve(listPath, Path);
+        string itemPath = JsonPointer.Resolve(index.ToString(System.Globalization.CultureInfo.InvariantCulture), absoluteList);
         return new EvaluationContext(Surface, Data, itemPath, [.. Indices, index]);
     }
 

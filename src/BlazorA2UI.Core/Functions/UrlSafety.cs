@@ -1,4 +1,4 @@
-namespace BlazorA2UI.Functions;
+﻿namespace BlazorA2UI.Functions;
 
 /// <summary>URL checks shared by <c>openUrl</c> and the media components.</summary>
 public static class UrlSafety
@@ -10,7 +10,7 @@ public static class UrlSafety
     /// <exception cref="A2UIExpressionException">The URL is empty or uses another scheme.</exception>
     public static string ValidateNavigationUrl(string? url)
     {
-        var trimmed = Clean(url);
+        string trimmed = Clean(url);
         if (trimmed.Length == 0)
         {
             throw new A2UIExpressionException("openUrl needs a non-empty url.");
@@ -21,7 +21,7 @@ public static class UrlSafety
             return trimmed;
         }
 
-        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out Uri? uri)
             && uri.Scheme is "http" or "https"
             && !string.IsNullOrEmpty(uri.Host)
             && HasAuthority(trimmed))
@@ -39,7 +39,7 @@ public static class UrlSafety
     /// </summary>
     public static string? ValidateMediaUrl(string? url, bool allowData = true)
     {
-        var trimmed = Clean(url);
+        string trimmed = Clean(url);
         if (trimmed.Length == 0)
         {
             return null;
@@ -50,13 +50,13 @@ public static class UrlSafety
             return trimmed;
         }
 
-        var colon = trimmed.IndexOf(':');
+        int colon = trimmed.IndexOf(':');
         if (colon <= 0)
         {
             return null;
         }
 
-        var scheme = trimmed[..colon].ToLowerInvariant();
+        string scheme = trimmed[..colon].ToLowerInvariant();
         if (scheme == "data")
         {
             return allowData ? trimmed : null;
@@ -67,7 +67,7 @@ public static class UrlSafety
             return null;
         }
 
-        return Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host) ? trimmed : null;
+        return Uri.TryCreate(trimmed, UriKind.Absolute, out Uri? uri) && !string.IsNullOrEmpty(uri.Host) ? trimmed : null;
     }
 
     private static string Clean(string? url)
@@ -77,7 +77,7 @@ public static class UrlSafety
             return string.Empty;
         }
 
-        var trimmed = url.Trim().Trim(Enumerable.Range(0, 0x21).Select(c => (char)c).ToArray());
+        string trimmed = url.Trim().Trim(Enumerable.Range(0, 0x21).Select(c => (char)c).ToArray());
 
         // Browsers drop tab, newline and carriage return anywhere in a URL.
         return trimmed.Replace("\t", string.Empty).Replace("\n", string.Empty).Replace("\r", string.Empty);
@@ -85,16 +85,16 @@ public static class UrlSafety
 
     private static bool HasAuthority(string url)
     {
-        var colon = url.IndexOf(':');
-        var rest = url.AsSpan(colon + 1);
+        int colon = url.IndexOf(':');
+        ReadOnlySpan<char> rest = url.AsSpan(colon + 1);
         return rest.Length > 2 && rest[0] == '/' && rest[1] == '/' && rest[2] is not ('/' or '\\');
     }
 
     private static bool IsRelativeSameHost(string url)
     {
-        var colon = url.IndexOf(':');
-        var firstDelimiter = url.IndexOfAny(['/', '?', '#']);
-        var hasScheme = colon > 0 && (firstDelimiter < 0 || colon < firstDelimiter)
+        int colon = url.IndexOf(':');
+        int firstDelimiter = url.IndexOfAny(['/', '?', '#']);
+        bool hasScheme = colon > 0 && (firstDelimiter < 0 || colon < firstDelimiter)
                         && url[..colon].All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '+' or '-' or '.')
                         && char.IsAsciiLetter(url[0]);
         if (hasScheme)
@@ -102,7 +102,7 @@ public static class UrlSafety
             return false;
         }
 
-        var normalized = url.Replace('\\', '/');
+        string normalized = url.Replace('\\', '/');
         return !normalized.StartsWith("//", StringComparison.Ordinal);
     }
 }

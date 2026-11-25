@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -15,7 +15,7 @@ public static partial class BasicFunctions
     /// <summary>Returns every basic catalog function implementation, keyed by name.</summary>
     public static IReadOnlyDictionary<string, A2UIFunction> Create(CultureInfo? culture = null)
     {
-        var c = ResolveCulture(culture);
+        CultureInfo c = ResolveCulture(culture);
         return new Dictionary<string, A2UIFunction>(StringComparer.Ordinal)
         {
             ["required"] = Sync(Required),
@@ -48,8 +48,8 @@ public static partial class BasicFunctions
 
     private static JsonNode Required(FunctionInvocation i)
     {
-        var value = i.Arg("value");
-        var present = value switch
+        JsonNode? value = i.Arg("value");
+        bool present = value switch
         {
             null => false,
             JsonArray arr => arr.Count > 0,
@@ -62,10 +62,10 @@ public static partial class BasicFunctions
 
     private static JsonNode RegexMatch(FunctionInvocation i)
     {
-        var pattern = A2UIValues.AsString(i.Arg("pattern"))
+        string pattern = A2UIValues.AsString(i.Arg("pattern"))
                       ?? throw new A2UIExpressionException("regex needs a string pattern.");
-        var value = A2UIValues.ToDisplayString(i.Arg("value"));
-        var regex = A2UIRegex.Compile(pattern);
+        string value = A2UIValues.ToDisplayString(i.Arg("value"));
+        Regex regex = A2UIRegex.Compile(pattern);
         if (A2UIRegex.CountCodePoints(value) > A2UIRegex.MaxValueCodePoints)
         {
             return Valid(false, "Value exceeds the maximum length for pattern matching.");
@@ -76,15 +76,15 @@ public static partial class BasicFunctions
 
     private static JsonNode Length(FunctionInvocation i)
     {
-        var value = i.Arg("value");
-        var length = value switch
+        JsonNode? value = i.Arg("value");
+        int length = value switch
         {
             null => 0,
             JsonArray arr => arr.Count,
             _ => A2UIRegex.CountCodePoints(A2UIValues.ToDisplayString(value)),
         };
-        var min = A2UIValues.ToDouble(i.Arg("min"));
-        var max = A2UIValues.ToDouble(i.Arg("max"));
+        double? min = A2UIValues.ToDouble(i.Arg("min"));
+        double? max = A2UIValues.ToDouble(i.Arg("max"));
         if (min is { } lo && length < lo)
         {
             return Valid(false, $"Minimum length is {A2UIValues.FormatNumber(lo)}.");
@@ -100,8 +100,8 @@ public static partial class BasicFunctions
             return Valid(false, "Value must be a valid number.");
         }
 
-        var min = A2UIValues.ToDouble(i.Arg("min"));
-        var max = A2UIValues.ToDouble(i.Arg("max"));
+        double? min = A2UIValues.ToDouble(i.Arg("min"));
+        double? max = A2UIValues.ToDouble(i.Arg("max"));
         if (min is { } lo && n < lo)
         {
             return Valid(false, $"Minimum value is {A2UIValues.FormatNumber(lo)}.");
@@ -115,21 +115,21 @@ public static partial class BasicFunctions
 
     private static JsonNode Email(FunctionInvocation i)
     {
-        var value = A2UIValues.AsString(i.Arg("value"));
-        var valid = value is not null && value.Length <= 320 && EmailPattern().IsMatch(value);
+        string? value = A2UIValues.AsString(i.Arg("value"));
+        bool valid = value is not null && value.Length <= 320 && EmailPattern().IsMatch(value);
         return Valid(valid, "Please enter a valid email address (e.g. user@example.com).", "INVALID_EMAIL", "error");
     }
 
     private static async ValueTask<JsonNode?> FormatStringAsync(FunctionInvocation i)
     {
-        var template = A2UIValues.ToDisplayString(i.Arg("value"));
-        var parts = ExpressionParser.Parse(template);
-        var sb = new StringBuilder();
-        var wasInTemplate = i.Scope.InTemplate;
+        string template = A2UIValues.ToDisplayString(i.Arg("value"));
+        List<JsonNode?> parts = ExpressionParser.Parse(template);
+        StringBuilder sb = new();
+        bool wasInTemplate = i.Scope.InTemplate;
         i.Scope.InTemplate = true;
         try
         {
-            foreach (var part in parts)
+            foreach (JsonNode? part in parts)
             {
                 if (part is JsonValue literal && literal.GetValueKind() == JsonValueKind.String)
                 {
@@ -162,7 +162,7 @@ public static partial class BasicFunctions
 
     private static NumberFormatInfo NumberFormat(CultureInfo culture, bool grouping)
     {
-        var format = (NumberFormatInfo)culture.NumberFormat.Clone();
+        NumberFormatInfo format = (NumberFormatInfo)culture.NumberFormat.Clone();
         if (!grouping)
         {
             format.NumberGroupSeparator = string.Empty;
@@ -181,16 +181,16 @@ public static partial class BasicFunctions
             return string.Empty;
         }
 
-        var format = NumberFormat(culture, Grouping(i));
+        NumberFormatInfo format = NumberFormat(culture, Grouping(i));
         if (A2UIValues.ToDouble(i.Arg("decimals")) is { } d)
         {
-            var digits = (int)Math.Clamp(d, 0, 20);
+            int digits = (int)Math.Clamp(d, 0, 20);
             return Math.Round(n, digits, MidpointRounding.AwayFromZero).ToString("N" + digits, format);
         }
 
-        var rounded = Math.Round(n, 3, MidpointRounding.AwayFromZero);
-        var text = rounded.ToString("N3", format);
-        var sep = format.NumberDecimalSeparator;
+        double rounded = Math.Round(n, 3, MidpointRounding.AwayFromZero);
+        string text = rounded.ToString("N3", format);
+        string sep = format.NumberDecimalSeparator;
         if (text.Contains(sep, StringComparison.Ordinal))
         {
             text = text.TrimEnd('0');
@@ -210,15 +210,15 @@ public static partial class BasicFunctions
             return string.Empty;
         }
 
-        var code = (A2UIValues.AsString(i.Arg("currency")) ?? string.Empty).Trim().ToUpperInvariant();
-        var format = NumberFormat(culture, Grouping(i));
-        var (symbol, defaultDigits) = CurrencyInfo(code, culture);
+        string code = (A2UIValues.AsString(i.Arg("currency")) ?? string.Empty).Trim().ToUpperInvariant();
+        NumberFormatInfo format = NumberFormat(culture, Grouping(i));
+        (string? symbol, int defaultDigits) = CurrencyInfo(code, culture);
         format.CurrencySymbol = symbol;
-        var digits = A2UIValues.ToDouble(i.Arg("decimals")) is { } d ? (int)Math.Clamp(d, 0, 20) : defaultDigits;
+        int digits = A2UIValues.ToDouble(i.Arg("decimals")) is { } d ? (int)Math.Clamp(d, 0, 20) : defaultDigits;
         return Math.Round(n, digits, MidpointRounding.AwayFromZero).ToString("C" + digits, format);
     }
 
-    private static readonly Dictionary<string, (string Symbol, int Digits)> CurrencyCache = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, (string Symbol, int Digits)> s_currencyCache = new(StringComparer.Ordinal);
 
     private static (string Symbol, int Digits) CurrencyInfo(string code, CultureInfo culture)
     {
@@ -239,15 +239,15 @@ public static partial class BasicFunctions
             // Neutral cultures have no region.
         }
 
-        lock (CurrencyCache)
+        lock (s_currencyCache)
         {
-            if (CurrencyCache.TryGetValue(code, out var cached))
+            if (s_currencyCache.TryGetValue(code, out (string Symbol, int Digits) cached))
             {
                 return cached;
             }
 
             (string, int) found = (code, 2);
-            foreach (var specific in CultureInfo.GetCultures(CultureTypes.SpecificCultures))
+            foreach (CultureInfo specific in CultureInfo.GetCultures(CultureTypes.SpecificCultures))
             {
                 try
                 {
@@ -265,15 +265,15 @@ public static partial class BasicFunctions
                 }
             }
 
-            CurrencyCache[code] = found;
+            s_currencyCache[code] = found;
             return found;
         }
     }
 
     private static JsonNode? FormatDate(FunctionInvocation i, CultureInfo culture)
     {
-        var format = A2UIValues.AsString(i.Arg("format")) ?? "yyyy-MM-dd";
-        if (!TryReadDate(i.Arg("value"), out var date))
+        string format = A2UIValues.AsString(i.Arg("format")) ?? "yyyy-MM-dd";
+        if (!TryReadDate(i.Arg("value"), out DateTimeOffset date))
         {
             return string.Empty;
         }
@@ -286,7 +286,7 @@ public static partial class BasicFunctions
         return Tr35DateFormatter.Format(date, format, culture);
     }
 
-    private static readonly string[] DateFormats =
+    private static readonly string[] s_dateFormats =
     [
         "yyyy-MM-dd", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF",
         "yyyy-MM-dd'T'HH:mmK", "yyyy-MM-dd'T'HH:mm:ssK", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFK",
@@ -307,7 +307,7 @@ public static partial class BasicFunctions
             return true;
         }
 
-        var text = A2UIValues.AsString(value)?.Trim();
+        string? text = A2UIValues.AsString(value)?.Trim();
         if (string.IsNullOrEmpty(text))
         {
             return false;
@@ -315,7 +315,7 @@ public static partial class BasicFunctions
 
         return DateTimeOffset.TryParseExact(
             text,
-            DateFormats,
+            s_dateFormats,
             CultureInfo.InvariantCulture,
             DateTimeStyles.AssumeUniversal,
             out date);
@@ -323,11 +323,11 @@ public static partial class BasicFunctions
 
     private static JsonNode? Pluralize(FunctionInvocation i, CultureInfo culture)
     {
-        var n = A2UIValues.ToDouble(i.Arg("value")) ?? 0;
+        double n = A2UIValues.ToDouble(i.Arg("value")) ?? 0;
         string? Pick(string key) => i.Args.ContainsKey(key) ? A2UIValues.ToDisplayString(i.Args[key]) : null;
 
         // Exact matches for 0, 1 and 2 win when the agent supplied them.
-        var exact = n switch { 0 => Pick("zero"), 1 => Pick("one"), 2 => Pick("two"), _ => null };
+        string? exact = n switch { 0 => Pick("zero"), 1 => Pick("one"), 2 => Pick("two"), _ => null };
         if (exact is not null)
         {
             return exact;
@@ -338,7 +338,7 @@ public static partial class BasicFunctions
 
     private static async ValueTask<JsonNode?> OpenUrlAsync(FunctionInvocation i)
     {
-        var url = UrlSafety.ValidateNavigationUrl(A2UIValues.AsString(i.Arg("url")));
+        string url = UrlSafety.ValidateNavigationUrl(A2UIValues.AsString(i.Arg("url")));
         if (i.Services?.GetService(typeof(IA2UIUrlLauncher)) is IA2UIUrlLauncher launcher)
         {
             await launcher.OpenAsync(url, i.CancellationToken).ConfigureAwait(false);

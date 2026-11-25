@@ -1,4 +1,4 @@
-// The dialect parser and static safety check are ported from the A2UI TypeScript web core
+﻿// The dialect parser and static safety check are ported from the A2UI TypeScript web core
 // (typescript/core/web_core/src/common/regex_subset.ts), Copyright 2024 Google LLC,
 // licensed under the Apache License, Version 2.0. See THIRD-PARTY-NOTICES.md.
 
@@ -20,8 +20,8 @@ public static class A2UIRegex
     public const int MaxValueCodePoints = 4096;
     private const int MaxQuantifierBound = 65535;
     private const int MaxCodePoint = 0x10FFFF;
-    private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(250);
-    private static readonly ConcurrentDictionary<string, Regex> Cache = new(StringComparer.Ordinal);
+    private static readonly TimeSpan s_matchTimeout = TimeSpan.FromMilliseconds(250);
+    private static readonly ConcurrentDictionary<string, Regex> s_cache = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Tests <paramref name="value"/> against <paramref name="pattern"/> with search semantics.
@@ -29,7 +29,7 @@ public static class A2UIRegex
     /// <exception cref="A2UIExpressionException">The pattern is not in the dialect or fails the safety check.</exception>
     public static bool IsMatch(string pattern, string value)
     {
-        var regex = Compile(pattern);
+        Regex regex = Compile(pattern);
         if (CountCodePoints(value) > MaxValueCodePoints)
         {
             return false;
@@ -48,19 +48,19 @@ public static class A2UIRegex
     /// <summary>Validates <paramref name="pattern"/> and returns the compiled .NET regex.</summary>
     public static Regex Compile(string pattern)
     {
-        if (Cache.TryGetValue(pattern, out var cached))
+        if (s_cache.TryGetValue(pattern, out Regex? cached))
         {
             return cached;
         }
 
-        var tree = Analyze(pattern);
-        var regex = new Regex(Emit(tree), RegexOptions.CultureInvariant, MatchTimeout);
-        if (Cache.Count > 512)
+        Node tree = Analyze(pattern);
+        Regex regex = new(Emit(tree), RegexOptions.CultureInvariant, s_matchTimeout);
+        if (s_cache.Count > 512)
         {
-            Cache.Clear();
+            s_cache.Clear();
         }
 
-        Cache[pattern] = regex;
+        s_cache[pattern] = regex;
         return regex;
     }
 
@@ -106,8 +106,8 @@ public static class A2UIRegex
 
     internal static int CountCodePoints(string input)
     {
-        var count = 0;
-        for (var i = 0; i < input.Length; i++)
+        int count = 0;
+        for (int i = 0; i < input.Length; i++)
         {
             if (char.IsHighSurrogate(input[i]) && i + 1 < input.Length && char.IsLowSurrogate(input[i + 1]))
             {
@@ -148,18 +148,18 @@ public static class A2UIRegex
 
     // ------------------------------------------------------------ ranges
 
-    private static readonly Range Surrogates = new(0xD800, 0xDFFF);
-    private static readonly Range[] DigitRanges = [new(0x30, 0x39)];
-    private static readonly Range[] WordRanges = [new(0x30, 0x39), new(0x41, 0x5A), new(0x5F, 0x5F), new(0x61, 0x7A)];
+    private static readonly Range s_surrogates = new(0xD800, 0xDFFF);
+    private static readonly Range[] s_digitRanges = [new(0x30, 0x39)];
+    private static readonly Range[] s_wordRanges = [new(0x30, 0x39), new(0x41, 0x5A), new(0x5F, 0x5F), new(0x61, 0x7A)];
 
-    private static readonly Range[] SpaceRanges =
+    private static readonly Range[] s_spaceRanges =
     [
         new(0x09, 0x0D), new(0x20, 0x20), new(0xA0, 0xA0), new(0x1680, 0x1680), new(0x2000, 0x200A),
         new(0x2028, 0x2029), new(0x202F, 0x202F), new(0x205F, 0x205F), new(0x3000, 0x3000), new(0xFEFF, 0xFEFF),
     ];
 
-    private static readonly Range[] LineTerminators = [new(0x0A, 0x0A), new(0x0D, 0x0D), new(0x2028, 0x2029)];
-    private static readonly IReadOnlyList<Range> DotRanges = Complement(LineTerminators);
+    private static readonly Range[] s_lineTerminators = [new(0x0A, 0x0A), new(0x0D, 0x0D), new(0x2028, 0x2029)];
+    private static readonly IReadOnlyList<Range> s_dotRanges = Complement(s_lineTerminators);
 
     private static IEnumerable<Range> ExcludeSurrogates(Range r)
     {
@@ -168,36 +168,36 @@ public static class A2UIRegex
             yield break;
         }
 
-        if (r.End < Surrogates.Start || r.Start > Surrogates.End)
+        if (r.End < s_surrogates.Start || r.Start > s_surrogates.End)
         {
             yield return r;
             yield break;
         }
 
-        if (r.Start < Surrogates.Start)
+        if (r.Start < s_surrogates.Start)
         {
-            yield return new Range(r.Start, Surrogates.Start - 1);
+            yield return new Range(r.Start, s_surrogates.Start - 1);
         }
 
-        if (r.End > Surrogates.End)
+        if (r.End > s_surrogates.End)
         {
-            yield return new Range(Surrogates.End + 1, r.End);
+            yield return new Range(s_surrogates.End + 1, r.End);
         }
     }
 
     internal static IReadOnlyList<Range> Normalize(IEnumerable<Range> ranges)
     {
-        var split = ranges.SelectMany(ExcludeSurrogates).OrderBy(r => r.Start).ThenBy(r => r.End).ToList();
+        List<Range> split = ranges.SelectMany(ExcludeSurrogates).OrderBy(r => r.Start).ThenBy(r => r.End).ToList();
         if (split.Count <= 1)
         {
             return split;
         }
 
-        var merged = new List<Range> { split[0] };
-        for (var i = 1; i < split.Count; i++)
+        List<Range> merged = new() { split[0] };
+        for (int i = 1; i < split.Count; i++)
         {
-            var prev = merged[^1];
-            var curr = split[i];
+            Range prev = merged[^1];
+            Range curr = split[i];
             if (curr.Start <= prev.End + 1)
             {
                 merged[^1] = new Range(prev.Start, Math.Max(prev.End, curr.End));
@@ -213,13 +213,13 @@ public static class A2UIRegex
 
     internal static IReadOnlyList<Range> Complement(IEnumerable<Range> ranges)
     {
-        var excluded = Normalize(ranges.Append(Surrogates).SelectMany(r => new[] { r }));
+        IReadOnlyList<Range> excluded = Normalize(ranges.Append(s_surrogates).SelectMany(r => new[] { r }));
 
         // Normalize drops the surrogate block itself; add it back to the exclusion list.
-        var all = excluded.Append(Surrogates).OrderBy(r => r.Start).ToList();
-        var result = new List<Range>();
-        var cursor = 0;
-        foreach (var r in all)
+        List<Range> all = excluded.Append(s_surrogates).OrderBy(r => r.Start).ToList();
+        List<Range> result = new();
+        int cursor = 0;
+        foreach (Range r in all)
         {
             if (r.Start > cursor)
             {
@@ -261,10 +261,10 @@ public static class A2UIRegex
 
     private static int[] ToCodePoints(string pattern)
     {
-        var cps = new List<int>(pattern.Length);
-        for (var i = 0; i < pattern.Length; i++)
+        List<int> cps = new(pattern.Length);
+        for (int i = 0; i < pattern.Length; i++)
         {
-            var c = pattern[i];
+            char c = pattern[i];
             if (char.IsHighSurrogate(c))
             {
                 if (i + 1 >= pattern.Length || !char.IsLowSurrogate(pattern[i + 1]))
@@ -313,7 +313,7 @@ public static class A2UIRegex
 
         public Node ParsePattern()
         {
-            var tree = ParseDisjunction();
+            Node tree = ParseDisjunction();
             if (!Eof)
             {
                 throw new RegexSyntaxException("Unmatched closing parenthesis");
@@ -324,7 +324,7 @@ public static class A2UIRegex
 
         private Node ParseDisjunction()
         {
-            var branches = new List<Node> { ParseAlternative() };
+            List<Node> branches = new() { ParseAlternative() };
             while (Eat('|'))
             {
                 branches.Add(ParseAlternative());
@@ -335,7 +335,7 @@ public static class A2UIRegex
 
         private Node ParseAlternative()
         {
-            var items = new List<Node>();
+            List<Node> items = new();
             while (!Eof && Peek() != '|' && Peek() != ')')
             {
                 items.Add(ParseTerm());
@@ -351,7 +351,7 @@ public static class A2UIRegex
 
         private Node ParseTerm()
         {
-            var atom = ParseAtom();
+            Node atom = ParseAtom();
             if (!IsQuantifierStart(Peek()))
             {
                 return atom;
@@ -369,7 +369,7 @@ public static class A2UIRegex
 
         private Node ParseQuantifier(Node child)
         {
-            var q = Next();
+            int q = Next();
             int min;
             int? max;
             switch (q)
@@ -388,7 +388,7 @@ public static class A2UIRegex
                     break;
             }
 
-            var lazy = Eat('?');
+            bool lazy = Eat('?');
             if (IsQuantifierStart(Peek()))
             {
                 throw new RegexSyntaxException("Possessive or chained quantifiers are not supported");
@@ -415,7 +415,7 @@ public static class A2UIRegex
 
         private (int Min, int? Max) ParseBracedBounds()
         {
-            var min = ParseDecimal() ?? throw new RegexSyntaxException("Malformed brace quantifier");
+            int min = ParseDecimal() ?? throw new RegexSyntaxException("Malformed brace quantifier");
             if (min > MaxQuantifierBound)
             {
                 throw new RegexSyntaxException($"Quantifier lower bound {min} exceeds {MaxQuantifierBound}");
@@ -436,7 +436,7 @@ public static class A2UIRegex
                 return (min, null);
             }
 
-            var max = ParseDecimal();
+            int? max = ParseDecimal();
             if (max is null || !Eat('}'))
             {
                 throw new RegexSyntaxException("Malformed brace quantifier");
@@ -457,7 +457,7 @@ public static class A2UIRegex
 
         private Node ParseAtom()
         {
-            var cp = Next();
+            int cp = Next();
             switch (cp)
             {
                 case '^':
@@ -465,18 +465,18 @@ public static class A2UIRegex
                 case '$':
                     return new AnchorNode(Anchor.End);
                 case '.':
-                    return new CharSetNode(DotRanges);
+                    return new CharSetNode(s_dotRanges);
                 case '[':
                     return ParseClass();
                 case '(':
                     return ParseGroup();
                 case '\\':
-                {
-                    var esc = ParseEscape(inClass: false);
-                    return esc.Anchor is { } a ? new AnchorNode(a)
-                        : esc.Ranges is { } r ? new CharSetNode(r)
-                        : new CharSetNode([new Range(esc.Single!.Value, esc.Single.Value)]);
-                }
+                    {
+                        (int? Single, IReadOnlyList<Range>? Ranges, Anchor? Anchor) esc = ParseEscape(inClass: false);
+                        return esc.Anchor is { } a ? new AnchorNode(a)
+                            : esc.Ranges is { } r ? new CharSetNode(r)
+                            : new CharSetNode([new Range(esc.Single!.Value, esc.Single.Value)]);
+                    }
                 case '{' or '}' or ']':
                     throw new RegexSyntaxException("Unescaped brace or bracket is not supported");
                 case '*' or '+' or '?':
@@ -490,7 +490,7 @@ public static class A2UIRegex
         {
             if (!Eat('?'))
             {
-                var body = ParseDisjunction();
+                Node body = ParseDisjunction();
                 if (!Eat(')'))
                 {
                     throw new RegexSyntaxException("Unclosed group");
@@ -499,14 +499,14 @@ public static class A2UIRegex
                 return new GroupNode(true, body);
             }
 
-            var modifier = Peek();
+            int? modifier = Peek();
             if (modifier is not (':' or '=' or '!'))
             {
                 throw new RegexSyntaxException("Unsupported group extension");
             }
 
             Next();
-            var inner = ParseDisjunction();
+            Node inner = ParseDisjunction();
             if (!Eat(')'))
             {
                 throw new RegexSyntaxException("Unclosed group");
@@ -517,8 +517,8 @@ public static class A2UIRegex
 
         private Node ParseClass()
         {
-            var negated = Eat('^');
-            var ranges = new List<Range>();
+            bool negated = Eat('^');
+            List<Range> ranges = new();
             while (!Eof && Peek() != ']')
             {
                 ranges.AddRange(ParseClassItem());
@@ -534,13 +534,13 @@ public static class A2UIRegex
                 throw new RegexSyntaxException("Empty character class");
             }
 
-            var normalized = Normalize(ranges);
+            IReadOnlyList<Range> normalized = Normalize(ranges);
             return new CharSetNode(negated ? Complement(normalized) : normalized);
         }
 
         private IReadOnlyList<Range> ParseClassItem()
         {
-            var first = ParseClassAtom();
+            (int? Single, IReadOnlyList<Range> Ranges) first = ParseClassAtom();
             if (Peek() != '-' || Peek(1) == ']')
             {
                 return first.Ranges;
@@ -552,7 +552,7 @@ public static class A2UIRegex
                 throw new RegexSyntaxException("Character class subtraction is not supported");
             }
 
-            var second = ParseClassAtom();
+            (int? Single, IReadOnlyList<Range> Ranges) second = ParseClassAtom();
             if (first.Single is null || second.Single is null)
             {
                 throw new RegexSyntaxException("Character class escape cannot form a range");
@@ -568,11 +568,11 @@ public static class A2UIRegex
 
         private (int? Single, IReadOnlyList<Range> Ranges) ParseClassAtom()
         {
-            var cp = Peek();
+            int? cp = Peek();
             if (cp == '\\')
             {
                 Next();
-                var esc = ParseEscape(inClass: true);
+                (int? Single, IReadOnlyList<Range>? Ranges, Anchor? Anchor) esc = ParseEscape(inClass: true);
                 if (esc.Single is { } s)
                 {
                     return (s, [new Range(s, s)]);
@@ -596,7 +596,7 @@ public static class A2UIRegex
                 throw new RegexSyntaxException("Character class intersection is not supported");
             }
 
-            var lit = Next();
+            int lit = Next();
             return (lit, [new Range(lit, lit)]);
         }
 
@@ -607,7 +607,7 @@ public static class A2UIRegex
                 throw new RegexSyntaxException("Trailing backslash in pattern");
             }
 
-            var cp = Next();
+            int cp = Next();
             switch (cp)
             {
                 case 'b':
@@ -620,17 +620,17 @@ public static class A2UIRegex
 
                     return (null, null, Anchor.NotWordBoundary);
                 case 'd':
-                    return (null, DigitRanges, null);
+                    return (null, s_digitRanges, null);
                 case 'D':
-                    return (null, Complement(DigitRanges), null);
+                    return (null, Complement(s_digitRanges), null);
                 case 'w':
-                    return (null, WordRanges, null);
+                    return (null, s_wordRanges, null);
                 case 'W':
-                    return (null, Complement(WordRanges), null);
+                    return (null, Complement(s_wordRanges), null);
                 case 's':
-                    return (null, SpaceRanges, null);
+                    return (null, s_spaceRanges, null);
                 case 'S':
-                    return (null, Complement(SpaceRanges), null);
+                    return (null, Complement(s_spaceRanges), null);
                 case 't':
                     return (0x09, null, null);
                 case 'n':
@@ -665,10 +665,10 @@ public static class A2UIRegex
 
         private int ParseFixedHex(int digits)
         {
-            var value = 0;
-            for (var i = 0; i < digits; i++)
+            int value = 0;
+            for (int i = 0; i < digits; i++)
             {
-                var hv = HexValue(Peek());
+                int hv = HexValue(Peek());
                 if (hv < 0)
                 {
                     throw new RegexSyntaxException("Invalid hexadecimal escape");
@@ -691,10 +691,10 @@ public static class A2UIRegex
             else
             {
                 value = 0;
-                var count = 0;
+                int count = 0;
                 while (!Eof && Peek() != '}')
                 {
-                    var hv = HexValue(Peek());
+                    int hv = HexValue(Peek());
                     if (hv < 0)
                     {
                         throw new RegexSyntaxException("Invalid braced Unicode escape");
@@ -768,19 +768,19 @@ public static class A2UIRegex
             case AltNode a:
                 return Normalize(a.Branches.SelectMany(First));
             case ConcatNode c:
-            {
-                var acc = new List<Range>();
-                foreach (var item in c.Items)
                 {
-                    acc.AddRange(First(item));
-                    if (!Nullable(item))
+                    List<Range> acc = new();
+                    foreach (Node item in c.Items)
                     {
-                        break;
+                        acc.AddRange(First(item));
+                        if (!Nullable(item))
+                        {
+                            break;
+                        }
                     }
-                }
 
-                return Normalize(acc);
-            }
+                    return Normalize(acc);
+                }
 
             default:
                 return [];
@@ -819,10 +819,10 @@ public static class A2UIRegex
 
     private static bool BranchesOverlap(IReadOnlyList<Node> branches)
     {
-        var firsts = branches.Select(b => First(Unwrap(b))).ToList();
-        for (var i = 0; i < firsts.Count; i++)
+        List<IReadOnlyList<Range>> firsts = branches.Select(b => First(Unwrap(b))).ToList();
+        for (int i = 0; i < firsts.Count; i++)
         {
-            for (var j = i + 1; j < firsts.Count; j++)
+            for (int j = i + 1; j < firsts.Count; j++)
             {
                 if (Overlap(firsts[i], firsts[j]))
                 {
@@ -847,15 +847,15 @@ public static class A2UIRegex
 
     private static bool ConcatHasAdjacentOverlap(IReadOnlyList<Node> items)
     {
-        for (var i = 0; i < items.Count; i++)
+        for (int i = 0; i < items.Count; i++)
         {
             if (Unwrap(items[i]) is not RepeatNode { Max: null } x)
             {
                 continue;
             }
 
-            var xChars = Chars(x.Child);
-            for (var j = i + 1; j < items.Count; j++)
+            IReadOnlyList<Range> xChars = Chars(x.Child);
+            for (int j = i + 1; j < items.Count; j++)
             {
                 if (Unwrap(items[j]) is RepeatNode { Max: null } y && Overlap(xChars, Chars(y.Child)))
                 {
@@ -888,7 +888,7 @@ public static class A2UIRegex
 
     internal static string Emit(Node node)
     {
-        var sb = new StringBuilder();
+        StringBuilder sb = new();
         Emit(node, sb);
         return sb.ToString();
     }
@@ -922,7 +922,7 @@ public static class A2UIRegex
                 });
                 break;
             case ConcatNode c:
-                foreach (var item in c.Items)
+                foreach (Node item in c.Items)
                 {
                     Emit(item, sb);
                 }
@@ -930,7 +930,7 @@ public static class A2UIRegex
                 break;
             case AltNode alt:
                 sb.Append("(?:");
-                for (var i = 0; i < alt.Branches.Count; i++)
+                for (int i = 0; i < alt.Branches.Count; i++)
                 {
                     if (i > 0)
                     {
@@ -958,13 +958,13 @@ public static class A2UIRegex
 
     private static void EmitCharSet(IReadOnlyList<Range> ranges, StringBuilder sb)
     {
-        var bmp = ranges.Where(r => r.Start <= 0xFFFF).Select(r => new Range(r.Start, Math.Min(r.End, 0xFFFF))).ToList();
-        var astral = ranges.Where(r => r.End > 0xFFFF).Select(r => new Range(Math.Max(r.Start, 0x10000), r.End)).ToList();
-        var alternatives = new List<string>();
+        List<Range> bmp = ranges.Where(r => r.Start <= 0xFFFF).Select(r => new Range(r.Start, Math.Min(r.End, 0xFFFF))).ToList();
+        List<Range> astral = ranges.Where(r => r.End > 0xFFFF).Select(r => new Range(Math.Max(r.Start, 0x10000), r.End)).ToList();
+        List<string> alternatives = new();
         if (bmp.Count > 0)
         {
-            var cls = new StringBuilder("[");
-            foreach (var r in bmp)
+            StringBuilder cls = new("[");
+            foreach (Range r in bmp)
             {
                 cls.Append(CultureInfo.InvariantCulture, $"\\u{r.Start:X4}");
                 if (r.End != r.Start)
@@ -976,10 +976,10 @@ public static class A2UIRegex
             alternatives.Add(cls.Append(']').ToString());
         }
 
-        foreach (var r in astral)
+        foreach (Range r in astral)
         {
-            var (hs, ls) = Split(r.Start);
-            var (he, le) = Split(r.End);
+            (int hs, int ls) = Split(r.Start);
+            (int he, int le) = Split(r.End);
             if (hs == he)
             {
                 alternatives.Add($"\\u{hs:X4}[\\u{ls:X4}-\\u{le:X4}]");
@@ -1011,7 +1011,7 @@ public static class A2UIRegex
 
     private static (int High, int Low) Split(int cp)
     {
-        var v = cp - 0x10000;
+        int v = cp - 0x10000;
         return (0xD800 + (v >> 10), 0xDC00 + (v & 0x3FF));
     }
 }

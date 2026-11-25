@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using BlazorA2UI.Catalogs;
 using BlazorA2UI.Data;
@@ -77,7 +77,7 @@ public sealed class Surface
 
     internal void ReplaceComponents(IEnumerable<ComponentInstance> components)
     {
-        foreach (var component in components)
+        foreach (ComponentInstance component in components)
         {
             _components[component.Id] = component;
         }
@@ -134,8 +134,8 @@ public sealed class Surface
     /// </summary>
     public JsonNode? Evaluate(JsonNode? value, EvaluationContext context, out bool pending, EvaluationMode mode = EvaluationMode.Binding)
     {
-        var result = Evaluate(value, context, out pending, out var errors, mode);
-        foreach (var error in errors)
+        JsonNode? result = Evaluate(value, context, out pending, out IReadOnlyList<A2UIException>? errors, mode);
+        foreach (A2UIException error in errors)
         {
             ReportOnce(error);
         }
@@ -160,12 +160,12 @@ public sealed class Surface
         EvaluationMode mode,
         ISet<string>? requestedAgentCalls)
     {
-        var collected = new List<A2UIException>();
+        List<A2UIException> collected = new();
         errors = collected;
-        var scope = new EvaluationScope(mode) { ReportError = collected.Add, RequestedAgentCalls = requestedAgentCalls };
+        EvaluationScope scope = new(mode) { ReportError = collected.Add, RequestedAgentCalls = requestedAgentCalls };
         try
         {
-            var result = Processor.Evaluator.Evaluate(value, context, scope, NotifyChanged);
+            JsonNode? result = Processor.Evaluator.Evaluate(value, context, scope, NotifyChanged);
             pending = scope.Pending;
             return result;
         }
@@ -204,15 +204,15 @@ public sealed class Surface
             return CheckOutcome.Valid;
         }
 
-        var failures = new List<JsonObject>();
-        foreach (var rule in checks.OfType<JsonObject>())
+        List<JsonObject> failures = new();
+        foreach (JsonObject rule in checks.OfType<JsonObject>())
         {
-            var message = A2UIValues.AsString(rule["message"]);
-            var scope = new EvaluationScope(EvaluationMode.Check);
+            string? message = A2UIValues.AsString(rule["message"]);
+            EvaluationScope scope = new(EvaluationMode.Check);
             JsonObject result;
             try
             {
-                var value = Processor.Evaluator.Evaluate(rule["condition"], context, scope, NotifyChanged);
+                JsonNode? value = Processor.Evaluator.Evaluate(rule["condition"], context, scope, NotifyChanged);
                 if (scope.Pending)
                 {
                     continue;
@@ -265,21 +265,21 @@ public sealed class Surface
         string property,
         EvaluationContext context)
     {
-        var result = new List<(ComponentInstance, EvaluationContext)>();
-        var value = parent.Properties[property];
+        List<(ComponentInstance, EvaluationContext)> result = new();
+        JsonNode? value = parent.Properties[property];
         switch (value)
         {
-            case JsonValue v when v.TryGetValue<string>(out var id):
-                if (TryGetChild(parent, id, out var single))
+            case JsonValue v when v.TryGetValue<string>(out string? id):
+                if (TryGetChild(parent, id, out ComponentInstance? single))
                 {
                     result.Add((single, context));
                 }
 
                 break;
             case JsonArray arr:
-                foreach (var item in arr)
+                foreach (JsonNode? item in arr)
                 {
-                    if (item is JsonValue iv && iv.TryGetValue<string>(out var childId) && TryGetChild(parent, childId, out var child))
+                    if (item is JsonValue iv && iv.TryGetValue<string>(out string? childId) && TryGetChild(parent, childId, out ComponentInstance? child))
                     {
                         result.Add((child, context));
                     }
@@ -288,7 +288,7 @@ public sealed class Surface
                 break;
             case JsonObject template when A2UIValues.AsString(template["componentId"]) is { } templateId
                                           && A2UIValues.AsString(template["path"]) is { } listPath:
-                if (!TryGetChild(parent, templateId, out var templateComponent))
+                if (!TryGetChild(parent, templateId, out ComponentInstance? templateComponent))
                 {
                     break;
                 }
@@ -306,7 +306,7 @@ public sealed class Surface
 
                 if (list is JsonArray items)
                 {
-                    for (var i = 0; i < items.Count; i++)
+                    for (int i = 0; i < items.Count; i++)
                     {
                         result.Add((templateComponent, context.ForTemplateItem(listPath, i)));
                     }
@@ -338,7 +338,7 @@ public sealed class Surface
 
     internal void ReportOnce(A2UIException ex)
     {
-        var key = $"{ex.Code}|{ex.Message}";
+        string key = $"{ex.Code}|{ex.Message}";
         if (_reportedErrors.Count < 256 && _reportedErrors.Add(key))
         {
             Processor.ReportError(ex, SurfaceId);

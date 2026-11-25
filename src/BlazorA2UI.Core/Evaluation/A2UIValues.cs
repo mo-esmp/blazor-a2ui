@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -7,7 +7,7 @@ namespace BlazorA2UI.Evaluation;
 /// <summary>Coercion rules between JSON values, as defined by A2UI v1.0.</summary>
 public static class A2UIValues
 {
-    private static readonly JsonSerializerOptions CompactJson = new() { WriteIndented = false };
+    private static readonly JsonSerializerOptions s_compactJson = new() { WriteIndented = false };
 
     /// <summary>
     /// <c>DynamicBoolean</c> coercion: booleans unchanged, <c>ValidationResult</c> to its <c>valid</c>,
@@ -31,10 +31,10 @@ public static class A2UIValues
                     case JsonValueKind.False:
                         return false;
                     case JsonValueKind.String:
-                        var s = v.GetValue<string>();
+                        string s = v.GetValue<string>();
                         return string.Equals(s, "true", StringComparison.OrdinalIgnoreCase);
                     case JsonValueKind.Number:
-                        var d = ToDouble(v);
+                        double? d = ToDouble(v);
                         return d is { } n && n != 0 && !double.IsNaN(n);
                     default:
                         return false;
@@ -74,7 +74,7 @@ public static class A2UIValues
                 break;
         }
 
-        return value.ToJsonString(CompactJson);
+        return value.ToJsonString(s_compactJson);
     }
 
     /// <summary>Formats a number the way JavaScript's <c>String(n)</c> does for common values.</summary>
@@ -109,30 +109,30 @@ public static class A2UIValues
         switch (v.GetValueKind())
         {
             case JsonValueKind.Number:
-                if (v.TryGetValue<double>(out var d))
+                if (v.TryGetValue<double>(out double d))
                 {
                     return d;
                 }
 
-                if (v.TryGetValue<int>(out var i))
+                if (v.TryGetValue<int>(out int i))
                 {
                     return i;
                 }
 
-                if (v.TryGetValue<long>(out var l))
+                if (v.TryGetValue<long>(out long l))
                 {
                     return l;
                 }
 
-                if (v.TryGetValue<decimal>(out var m))
+                if (v.TryGetValue<decimal>(out decimal m))
                 {
                     return (double)m;
                 }
 
                 return double.Parse(v.ToJsonString(), CultureInfo.InvariantCulture);
             case JsonValueKind.String:
-                var s = v.GetValue<string>().Trim();
-                return s.Length > 0 && double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+                string s = v.GetValue<string>().Trim();
+                return s.Length > 0 && double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed)
                     ? parsed
                     : null;
             default:
@@ -147,7 +147,7 @@ public static class A2UIValues
     /// <summary>Builds a <c>ValidationResult</c> object.</summary>
     public static JsonObject ValidationResult(bool valid, string? message = null, string? code = null, string? severity = null)
     {
-        var result = new JsonObject { ["valid"] = valid };
+        JsonObject result = new() { ["valid"] = valid };
         if (code is not null)
         {
             result["code"] = code;
@@ -175,7 +175,7 @@ public static class A2UIValues
     {
         if (value is JsonObject obj && IsValidationResult(obj))
         {
-            var result = (JsonObject)obj.DeepClone();
+            JsonObject result = (JsonObject)obj.DeepClone();
             if (!obj["valid"]!.GetValue<bool>())
             {
                 if (ruleMessage is not null)

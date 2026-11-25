@@ -1,5 +1,6 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using BlazorA2UI.Catalogs;
@@ -18,7 +19,7 @@ namespace BlazorA2UI.Processing;
 /// </summary>
 public sealed class MessageProcessor
 {
-    private static readonly string[] MessageKinds =
+    private static readonly string[] s_messageKinds =
         ["createSurface", "updateComponents", "updateDataModel", "deleteSurface", "callRendererFunction", "agentFunctionResponse"];
 
     private readonly ConcurrentDictionary<string, Surface> _surfaces = new(StringComparer.Ordinal);
@@ -30,7 +31,7 @@ public sealed class MessageProcessor
     {
         Options = options ?? new A2UIProcessorOptions();
         Catalogs = new CatalogRegistry(catalogs);
-        foreach (var catalog in Catalogs.Catalogs)
+        foreach (Catalog catalog in Catalogs.Catalogs)
         {
             if (catalog.ProtocolVersion != A2UIProtocol.Version)
             {
@@ -91,8 +92,8 @@ public sealed class MessageProcessor
     /// <summary>The <c>a2uiRendererDataModel</c> metadata for surfaces that asked for <c>sendDataModel</c>, or null.</summary>
     public JsonObject? GetRendererDataModel()
     {
-        var surfaces = new JsonObject();
-        foreach (var surface in _surfaces.Values.Where(s => s.SendDataModel).OrderBy(s => s.SurfaceId, StringComparer.Ordinal))
+        JsonObject surfaces = new();
+        foreach (Surface? surface in _surfaces.Values.Where(s => s.SendDataModel).OrderBy(s => s.SurfaceId, StringComparer.Ordinal))
         {
             surfaces[surface.SurfaceId] = surface.DataModelSnapshot();
         }
@@ -147,7 +148,7 @@ public sealed class MessageProcessor
     /// </summary>
     public void ProcessOrThrow(JsonNode? message, A2UIValidationConfig? validation)
     {
-        var previous = _activeValidation;
+        A2UIValidationConfig? previous = _activeValidation;
         _activeValidation = validation ?? Options.Validation;
         try
         {
@@ -164,7 +165,7 @@ public sealed class MessageProcessor
         switch (message)
         {
             case JsonArray batch:
-                foreach (var item in batch)
+                foreach (JsonNode? item in batch)
                 {
                     ProcessCore(item);
                 }
@@ -199,22 +200,22 @@ public sealed class MessageProcessor
         switch (node)
         {
             case JsonArray array:
-                foreach (var item in array)
+                foreach (JsonNode? item in array)
                 {
                     CheckDepthAndPaths(item, depth + 1);
                 }
 
                 break;
             case JsonObject obj:
-                foreach (var key in new[] { "path", "@path" })
+                foreach (string? key in new[] { "path", "@path" })
                 {
-                    if (obj[key] is JsonValue v && v.TryGetValue<string>(out var path) && !IsValidPathSyntax(path))
+                    if (obj[key] is JsonValue v && v.TryGetValue<string>(out string? path) && !IsValidPathSyntax(path))
                     {
                         throw new A2UIValidationException($"Invalid path syntax: '{path}'") { Path = "/" + key };
                     }
                 }
 
-                foreach (var (_, value) in obj)
+                foreach ((string _, JsonNode? value) in obj)
                 {
                     CheckDepthAndPaths(value, depth + 1);
                 }
@@ -226,7 +227,7 @@ public sealed class MessageProcessor
     /// <summary>A JSON Pointer or relative path whose <c>~</c> characters are all <c>~0</c> or <c>~1</c> escapes.</summary>
     private static bool IsValidPathSyntax(string path)
     {
-        for (var i = 0; i < path.Length; i++)
+        for (int i = 0; i < path.Length; i++)
         {
             if (path[i] == '~' && (i + 1 >= path.Length || path[i + 1] is not ('0' or '1')))
             {
@@ -252,18 +253,18 @@ public sealed class MessageProcessor
 
     private void ProcessEnvelope(JsonObject envelope)
     {
-        if (!envelope.TryGetPropertyValue("version", out var versionNode))
+        if (!envelope.TryGetPropertyValue("version", out JsonNode? versionNode))
         {
             throw new A2UIValidationException("The message has no 'version' field.");
         }
 
-        var version = A2UIValues.AsString(versionNode);
+        string? version = A2UIValues.AsString(versionNode);
         if (version != A2UIProtocol.Version)
         {
             throw new A2UIValidationException($"Unsupported protocol version '{versionNode?.ToJsonString()}'; this renderer implements {A2UIProtocol.Version}.");
         }
 
-        var kinds = envelope.Select(p => p.Key).Where(k => k != "version").ToList();
+        List<string> kinds = envelope.Select(p => p.Key).Where(k => k != "version").ToList();
         if (kinds.Count > 1)
         {
             throw new A2UIValidationException("Message contains multiple conflicting update actions.");
@@ -274,8 +275,8 @@ public sealed class MessageProcessor
             throw new A2UIValidationException("The message has no action.");
         }
 
-        var kind = kinds[0];
-        if (!MessageKinds.Contains(kind))
+        string kind = kinds[0];
+        if (!s_messageKinds.Contains(kind))
         {
             throw new A2UIValidationException($"action '{kind}' is not supported in protocol version {A2UIProtocol.Version}.");
         }
@@ -311,7 +312,7 @@ public sealed class MessageProcessor
 
     private static string ReadSurfaceId(JsonObject body)
     {
-        if (!body.TryGetPropertyValue("surfaceId", out var node) || A2UIValues.AsString(node) is not { } id)
+        if (!body.TryGetPropertyValue("surfaceId", out JsonNode? node) || A2UIValues.AsString(node) is not { } id)
         {
             throw new A2UIValidationException("surfaceId must be a string.") { SurfaceId = string.Empty, Path = "/surfaceId" };
         }
@@ -325,14 +326,14 @@ public sealed class MessageProcessor
     }
 
     private Surface GetLiveSurface(string surfaceId) =>
-        _surfaces.TryGetValue(surfaceId, out var surface)
+        _surfaces.TryGetValue(surfaceId, out Surface? surface)
             ? surface
             : throw new A2UIException(A2UIErrorCodes.IntegrityError, $"Surface '{surfaceId}' does not exist.") { SurfaceId = surfaceId };
 
     private void CreateSurface(JsonObject body)
     {
-        var surfaceId = ReadSurfaceId(body);
-        foreach (var (key, _) in body)
+        string surfaceId = ReadSurfaceId(body);
+        foreach ((string key, JsonNode? _) in body)
         {
             if (key is not ("surfaceId" or "catalogId" or "sendDataModel" or "components" or "dataModel" or "metadata" or "theme"))
             {
@@ -357,7 +358,7 @@ public sealed class MessageProcessor
             }
         }
 
-        var metadata = ReadMetadata(body["metadata"], surfaceId, "createSurface.metadata");
+        JsonObject? metadata = ReadMetadata(body["metadata"], surfaceId, "createSurface.metadata");
         if (body["dataModel"] is { } dm && dm is not JsonObject)
         {
             throw new A2UIValidationException("dataModel must be an object.") { SurfaceId = surfaceId };
@@ -373,7 +374,7 @@ public sealed class MessageProcessor
             _usedSurfaceIds.Add(surfaceId);
         }
 
-        var surface = new Surface(
+        Surface surface = new(
             this,
             surfaceId,
             catalogId,
@@ -413,8 +414,8 @@ public sealed class MessageProcessor
 
     private void UpdateComponents(JsonObject body)
     {
-        var surfaceId = ReadSurfaceId(body);
-        var surface = GetLiveSurface(surfaceId);
+        string surfaceId = ReadSurfaceId(body);
+        Surface surface = GetLiveSurface(surfaceId);
         if (body["components"] is not { } components)
         {
             throw new A2UIValidationException("updateComponents needs a components list.") { SurfaceId = surfaceId };
@@ -430,13 +431,13 @@ public sealed class MessageProcessor
             throw new A2UIValidationException("components must be a non-empty array.") { SurfaceId = surface.SurfaceId };
         }
 
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var parsed = new List<ComponentInstance>();
-        var parseFailed = false;
-        var batchIndex = new Dictionary<string, int>(StringComparer.Ordinal);
-        for (var i = 0; i < list.Count; i++)
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        List<ComponentInstance> parsed = new();
+        bool parseFailed = false;
+        Dictionary<string, int> batchIndex = new(StringComparer.Ordinal);
+        for (int i = 0; i < list.Count; i++)
         {
-            var path = $"/components/{i}";
+            string path = $"/components/{i}";
             if (list[i] is not JsonObject raw)
             {
                 ReportValidation(surface.SurfaceId, path, "A component must be an object.");
@@ -467,8 +468,8 @@ public sealed class MessageProcessor
             }
         }
 
-        var candidate = surface.SnapshotComponents();
-        foreach (var component in parsed)
+        Dictionary<string, ComponentInstance> candidate = surface.SnapshotComponents();
+        foreach (ComponentInstance component in parsed)
         {
             candidate[component.Id] = component;
         }
@@ -499,9 +500,9 @@ public sealed class MessageProcessor
     /// </summary>
     private void TopologyCheck(string surfaceId, Dictionary<string, ComponentInstance> components)
     {
-        foreach (var component in components.Values)
+        foreach (ComponentInstance component in components.Values)
         {
-            foreach (var (childId, pointer) in component.ChildReferences())
+            foreach ((string childId, string? pointer) in component.ChildReferences())
             {
                 if (childId == component.Id)
                 {
@@ -520,13 +521,13 @@ public sealed class MessageProcessor
             return;
         }
 
-        var state = new Dictionary<string, int>(StringComparer.Ordinal); // 1 = visiting, 2 = done
-        var stack = new Stack<(string Id, int Depth, IEnumerator<string> Children)>();
+        Dictionary<string, int> state = new(StringComparer.Ordinal); // 1 = visiting, 2 = done
+        Stack<(string Id, int Depth, IEnumerator<string> Children)> stack = new();
         state["root"] = 1;
         stack.Push(("root", 0, components["root"].StaticChildIds().GetEnumerator()));
         while (stack.Count > 0)
         {
-            var (id, depth, children) = stack.Peek();
+            (string? id, int depth, IEnumerator<string>? children) = stack.Peek();
             if (!children.MoveNext())
             {
                 state[id] = 2;
@@ -534,13 +535,13 @@ public sealed class MessageProcessor
                 continue;
             }
 
-            var childId = children.Current;
-            if (!components.TryGetValue(childId, out var child))
+            string childId = children.Current;
+            if (!components.TryGetValue(childId, out ComponentInstance? child))
             {
                 continue; // Progressive rendering: the child may arrive later.
             }
 
-            if (state.TryGetValue(childId, out var s) && s == 1)
+            if (state.TryGetValue(childId, out int s) && s == 1)
             {
                 throw new A2UIException(A2UIErrorCodes.RecursionLimitExceeded, $"Circular reference detected involving component '{childId}'")
                 {
@@ -581,9 +582,9 @@ public sealed class MessageProcessor
 
         if (!validation.AllowDanglingReferences)
         {
-            foreach (var component in components.Values)
+            foreach (ComponentInstance component in components.Values)
             {
-                foreach (var (childId, pointer) in component.ChildReferences())
+                foreach ((string childId, string? pointer) in component.ChildReferences())
                 {
                     if (!components.ContainsKey(childId))
                     {
@@ -600,12 +601,12 @@ public sealed class MessageProcessor
 
         if (!validation.AllowOrphanComponents && !validation.AllowMissingRoot && components.ContainsKey("root"))
         {
-            var reached = new HashSet<string>(StringComparer.Ordinal) { "root" };
-            var queue = new Queue<string>();
+            HashSet<string> reached = new(StringComparer.Ordinal) { "root" };
+            Queue<string> queue = new();
             queue.Enqueue("root");
             while (queue.Count > 0)
             {
-                foreach (var childId in components[queue.Dequeue()].StaticChildIds())
+                foreach (string childId in components[queue.Dequeue()].StaticChildIds())
                 {
                     if (components.ContainsKey(childId) && reached.Add(childId))
                     {
@@ -627,8 +628,8 @@ public sealed class MessageProcessor
     /// <summary>Formats <c>/slots/1/child</c> as <c>slots[1].child</c>.</summary>
     private static string FieldName(string pointer)
     {
-        var builder = new System.Text.StringBuilder();
-        foreach (var segment in JsonPointer.Parse(pointer))
+        StringBuilder builder = new();
+        foreach (string segment in JsonPointer.Parse(pointer))
         {
             if (segment.All(char.IsAsciiDigit))
             {
@@ -654,13 +655,13 @@ public sealed class MessageProcessor
             return;
         }
 
-        var visited = new HashSet<string>(StringComparer.Ordinal) { "root" };
-        var queue = new Queue<string>();
+        HashSet<string> visited = new(StringComparer.Ordinal) { "root" };
+        Queue<string> queue = new();
         queue.Enqueue("root");
         while (queue.Count > 0)
         {
-            var component = components[queue.Dequeue()];
-            foreach (var (key, value) in component.Properties)
+            ComponentInstance component = components[queue.Dequeue()];
+            foreach ((string key, JsonNode? value) in component.Properties)
             {
                 if (ContainsIndexCall(value, 0))
                 {
@@ -672,7 +673,7 @@ public sealed class MessageProcessor
                 }
             }
 
-            foreach (var childId in component.StaticChildIds(includeTemplates: false))
+            foreach (string childId in component.StaticChildIds(includeTemplates: false))
             {
                 if (components.ContainsKey(childId) && visited.Add(childId))
                 {
@@ -696,12 +697,12 @@ public sealed class MessageProcessor
     /// </summary>
     private static void CompositionCheck(string surfaceId, Dictionary<string, ComponentInstance> components, Dictionary<string, int> batchIndex)
     {
-        var parents = new Dictionary<string, List<ComponentInstance>>(StringComparer.Ordinal);
-        foreach (var parent in components.Values)
+        Dictionary<string, List<ComponentInstance>> parents = new(StringComparer.Ordinal);
+        foreach (ComponentInstance parent in components.Values)
         {
-            foreach (var childId in parent.StaticChildIds())
+            foreach (string childId in parent.StaticChildIds())
             {
-                if (!parents.TryGetValue(childId, out var list))
+                if (!parents.TryGetValue(childId, out List<ComponentInstance>? list))
                 {
                     parents[childId] = list = [];
                 }
@@ -711,22 +712,22 @@ public sealed class MessageProcessor
         }
 
         string Pointer(string id, string suffix) =>
-            "/components/" + (batchIndex.TryGetValue(id, out var index) ? index.ToString(CultureInfo.InvariantCulture) : JsonPointer.Escape(id)) + suffix;
+            "/components/" + (batchIndex.TryGetValue(id, out int index) ? index.ToString(CultureInfo.InvariantCulture) : JsonPointer.Escape(id)) + suffix;
 
         static string Format(IReadOnlyList<string> names) => "[" + string.Join(", ", names.Select(n => $"'{n}'")) + "]";
 
-        foreach (var component in components.Values)
+        foreach (ComponentInstance component in components.Values)
         {
             if (component.Definition.AllowedParents is { Count: > 0 } allowedParents)
             {
-                var toCheck = new List<(string Id, string Type)>();
+                List<(string Id, string Type)> toCheck = new();
                 if (component.Id == "root")
                 {
                     toCheck.Add((Composition.SurfaceType, Composition.SurfaceType));
                 }
 
                 toCheck.AddRange((parents.GetValueOrDefault(component.Id) ?? []).Select(p => (p.Id, p.Type)));
-                foreach (var (parentId, parentType) in toCheck)
+                foreach ((string parentId, string? parentType) in toCheck)
                 {
                     if (!allowedParents.Contains(parentType))
                     {
@@ -743,9 +744,9 @@ public sealed class MessageProcessor
 
             if (component.Definition.AllowedChildren is { Count: > 0 } allowedChildren)
             {
-                foreach (var (childId, pointer) in component.ChildReferences())
+                foreach ((string childId, string? pointer) in component.ChildReferences())
                 {
-                    if (components.TryGetValue(childId, out var child) && !allowedChildren.Contains(child.Type))
+                    if (components.TryGetValue(childId, out ComponentInstance? child) && !allowedChildren.Contains(child.Type))
                     {
                         throw new A2UIException(
                             A2UIErrorCodes.UnallowedChild,
@@ -762,14 +763,14 @@ public sealed class MessageProcessor
 
     private void UpdateDataModel(JsonObject body)
     {
-        var surfaceId = ReadSurfaceId(body);
-        var surface = GetLiveSurface(surfaceId);
-        if (!body.TryGetPropertyValue("value", out var value))
+        string surfaceId = ReadSurfaceId(body);
+        Surface surface = GetLiveSurface(surfaceId);
+        if (!body.TryGetPropertyValue("value", out JsonNode? value))
         {
             throw new A2UIValidationException("updateDataModel needs a 'value' (use null to delete).") { SurfaceId = surfaceId };
         }
 
-        var path = body.ContainsKey("path")
+        string path = body.ContainsKey("path")
             ? A2UIValues.AsString(body["path"]) ?? throw new A2UIValidationException("path must be a string.") { SurfaceId = surfaceId, Path = "/path" }
             : "/";
         if (!path.StartsWith('/'))
@@ -796,19 +797,19 @@ public sealed class MessageProcessor
     /// <summary>A null written to a list element keeps the list's length (the element becomes null).</summary>
     private static bool IsListElement(DataModel model, string path)
     {
-        var segments = JsonPointer.Parse(path);
+        IReadOnlyList<string> segments = JsonPointer.Parse(path);
         if (segments.Count == 0)
         {
             return false;
         }
 
-        return model.TryGet(JsonPointer.Format(segments.Take(segments.Count - 1)), out var parent) && parent is JsonArray;
+        return model.TryGet(JsonPointer.Format(segments.Take(segments.Count - 1)), out JsonNode? parent) && parent is JsonArray;
     }
 
     private void DeleteSurface(JsonObject body)
     {
-        var surfaceId = ReadSurfaceId(body);
-        if (!_surfaces.TryRemove(surfaceId, out var surface))
+        string surfaceId = ReadSurfaceId(body);
+        if (!_surfaces.TryRemove(surfaceId, out Surface? surface))
         {
             return;
         }
@@ -821,14 +822,14 @@ public sealed class MessageProcessor
 
     private void HandleAgentFunctionResponse(JsonObject body)
     {
-        var id = A2UIValues.AsString(body["functionCallId"])
+        string id = A2UIValues.AsString(body["functionCallId"])
                  ?? throw new A2UIValidationException("agentFunctionResponse needs a functionCallId.");
         if (body.ContainsKey("value") == body.ContainsKey("error"))
         {
             throw new A2UIValidationException("agentFunctionResponse must have exactly one of 'value' or 'error'.") { FunctionCallId = id };
         }
 
-        foreach (var surface in _surfaces.Values)
+        foreach (Surface surface in _surfaces.Values)
         {
             if (surface.AgentCalls.TryComplete(id, body))
             {
@@ -842,7 +843,7 @@ public sealed class MessageProcessor
     /// <summary>Rejects a malformed <c>callRendererFunction</c> envelope before anything runs.</summary>
     private static void ValidateCallRendererFunction(JsonObject body)
     {
-        var functionCallId = A2UIValues.AsString(body["functionCallId"]) is { Length: > 0 } id
+        string functionCallId = A2UIValues.AsString(body["functionCallId"]) is { Length: > 0 } id
             ? id
             : throw new A2UIValidationException("callRendererFunction needs a non-empty string functionCallId.") { Path = "/functionCallId" };
 
@@ -872,7 +873,7 @@ public sealed class MessageProcessor
 
     private async Task HandleCallRendererFunctionAsync(JsonObject body)
     {
-        var functionCallId = A2UIValues.AsString(body["functionCallId"]);
+        string? functionCallId = A2UIValues.AsString(body["functionCallId"]);
         if (functionCallId is null)
         {
             ReportError(new A2UIException(A2UIErrorCodes.InvalidFunctionCall, "callRendererFunction needs a string functionCallId."), null);
@@ -891,8 +892,8 @@ public sealed class MessageProcessor
             EvaluationContext context;
             if (body.ContainsKey("surfaceId"))
             {
-                var surfaceId = A2UIValues.AsString(body["surfaceId"]);
-                if (surfaceId is null || !_surfaces.TryGetValue(surfaceId, out var surface))
+                string? surfaceId = A2UIValues.AsString(body["surfaceId"]);
+                if (surfaceId is null || !_surfaces.TryGetValue(surfaceId, out Surface? surface))
                 {
                     throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Surface '{surfaceId}' does not exist.");
                 }
@@ -904,7 +905,7 @@ public sealed class MessageProcessor
                 context = EvaluationContext.Detached();
             }
 
-            var value = await Evaluator.EvaluateAsync(call, context, new EvaluationScope(EvaluationMode.AgentCall)).ConfigureAwait(false);
+            JsonNode? value = await Evaluator.EvaluateAsync(call, context, new EvaluationScope(EvaluationMode.AgentCall)).ConfigureAwait(false);
             await SendOutboundAsync(new JsonObject
             {
                 ["version"] = A2UIProtocol.Version,
@@ -913,7 +914,7 @@ public sealed class MessageProcessor
         }
         catch (Exception ex)
         {
-            var code = ex is A2UIException { Code: A2UIErrorCodes.InvalidFunctionCall } ? A2UIErrorCodes.InvalidFunctionCall : A2UIErrorCodes.ExecutionError;
+            string code = ex is A2UIException { Code: A2UIErrorCodes.InvalidFunctionCall } ? A2UIErrorCodes.InvalidFunctionCall : A2UIErrorCodes.ExecutionError;
             await SendOutboundAsync(new JsonObject
             {
                 ["version"] = A2UIProtocol.Version,
@@ -939,7 +940,7 @@ public sealed class MessageProcessor
             return;
         }
 
-        var scope = new EvaluationScope(EvaluationMode.Action) { CancellationToken = cancellationToken };
+        EvaluationScope scope = new(EvaluationMode.Action) { CancellationToken = cancellationToken };
         try
         {
             if (actionObject["functionCall"] is JsonObject functionCall)
@@ -953,11 +954,11 @@ public sealed class MessageProcessor
                 throw new A2UIExpressionException("An action needs an 'event' with a name, or a 'functionCall'.");
             }
 
-            var context2 = new JsonObject();
+            JsonObject context2 = new();
             if (ev["context"] is JsonObject rawContext)
             {
                 // Entries resolve in order; the first failure stops the action.
-                foreach (var (key, raw) in rawContext)
+                foreach ((string key, JsonNode? raw) in rawContext)
                 {
                     try
                     {
@@ -977,7 +978,7 @@ public sealed class MessageProcessor
             string? userMessage = null;
             if (ev["userMessage"] is { } rawMessage)
             {
-                var resolved = await Evaluator.EvaluateAsync(rawMessage, context, scope).ConfigureAwait(false);
+                JsonNode? resolved = await Evaluator.EvaluateAsync(rawMessage, context, scope).ConfigureAwait(false);
                 if (resolved is not null && !(resolved is JsonValue sv && sv.GetValueKind() == JsonValueKind.String))
                 {
                     throw new A2UIException(A2UIErrorCodes.InvalidAction, "An action event's userMessage must resolve to a string.");
@@ -986,7 +987,7 @@ public sealed class MessageProcessor
                 userMessage = A2UIValues.AsString(resolved);
             }
 
-            var body = new JsonObject
+            JsonObject body = new()
             {
                 ["name"] = name,
                 ["surfaceId"] = surface.SurfaceId,
@@ -1009,7 +1010,7 @@ public sealed class MessageProcessor
 
     internal void ReportValidation(string surfaceId, string path, string message, string code = A2UIErrorCodes.ValidationFailed)
     {
-        var wireCode = code is A2UIErrorCodes.UnallowedChild or A2UIErrorCodes.UnallowedParent or A2UIErrorCodes.CatalogError
+        string wireCode = code is A2UIErrorCodes.UnallowedChild or A2UIErrorCodes.UnallowedParent or A2UIErrorCodes.CatalogError
             or A2UIErrorCodes.IntegrityError or A2UIErrorCodes.RecursionLimitExceeded
             ? code
             : A2UIErrorCodes.ValidationFailed;
@@ -1024,9 +1025,9 @@ public sealed class MessageProcessor
             return; // A cancelled call was cancelled on purpose (surface deleted or calls cancelled).
         }
 
-        var functionCallId = error.FunctionCallId;
+        string? functionCallId = error.FunctionCallId;
         surfaceId = functionCallId is null ? surfaceId ?? error.SurfaceId : null;
-        var report = new A2UIErrorReport(error.Code, error.Message, surfaceId, functionCallId, error.Path);
+        A2UIErrorReport report = new(error.Code, error.Message, surfaceId, functionCallId, error.Path);
         ErrorReported?.Invoke(report);
 
         if (!Options.SendErrorsToAgent || !HasOutbound || (surfaceId is null && functionCallId is null))
@@ -1034,7 +1035,7 @@ public sealed class MessageProcessor
             return;
         }
 
-        var body = new JsonObject { ["code"] = report.Code, ["message"] = report.Message };
+        JsonObject body = new() { ["code"] = report.Code, ["message"] = report.Message };
         if (surfaceId is not null)
         {
             body["surfaceId"] = surfaceId;
@@ -1100,7 +1101,7 @@ public sealed class MessageProcessor
             throw new A2UIValidationException($"{where} must be an object.") { SurfaceId = surfaceId };
         }
 
-        foreach (var (key, value) in metadata)
+        foreach ((string key, JsonNode? value) in metadata)
         {
             if (key != "extensions")
             {
@@ -1112,7 +1113,7 @@ public sealed class MessageProcessor
                 throw new A2UIValidationException($"{where}.extensions must be an object.") { SurfaceId = surfaceId };
             }
 
-            foreach (var (extensionKey, _) in extensions)
+            foreach ((string extensionKey, JsonNode? _) in extensions)
             {
                 if (!Uax31.IsIdentifier(extensionKey))
                 {

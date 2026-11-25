@@ -1,4 +1,4 @@
-using System.Text.Json.Nodes;
+﻿using System.Text.Json.Nodes;
 using BlazorA2UI.Catalogs;
 using BlazorA2UI.Evaluation;
 using BlazorA2UI.Expressions;
@@ -14,19 +14,19 @@ namespace BlazorA2UI.Processing;
 /// </summary>
 internal static class ComponentParser
 {
-    private static readonly JsonObject AccessibilitySchema = new() { ["$ref"] = "common_types.json#/$defs/AccessibilityAttributes" };
+    private static readonly JsonObject s_accessibilitySchema = new() { ["$ref"] = "common_types.json#/$defs/AccessibilityAttributes" };
 
-    private static readonly string[] EnvelopeKeys = ["catalogId", "accessibility", "metadata", "checks"];
+    private static readonly string[] s_envelopeKeys = ["catalogId", "accessibility", "metadata", "checks"];
 
     public static ComponentInstance Parse(JsonObject raw, Surface surface, CatalogRegistry catalogs, A2UIValidationConfig? validation = null)
     {
-        var id = A2UIValues.AsString(raw["id"]) ?? throw new A2UIValidationException("A component needs a string 'id'.");
+        string id = A2UIValues.AsString(raw["id"]) ?? throw new A2UIValidationException("A component needs a string 'id'.");
         if (!Uax31.IsIdentifier(id))
         {
             throw new A2UIValidationException($"Component id '{id}' must be a valid UAX #31 identifier.") { Path = "/id" };
         }
 
-        var type = A2UIValues.AsString(raw["component"])
+        string type = A2UIValues.AsString(raw["component"])
                    ?? throw new A2UIValidationException($"Component '{id}' needs a string 'component' type.");
         if (type == Composition.SurfaceType)
         {
@@ -36,7 +36,7 @@ internal static class ComponentParser
         // Resolve the catalog: @catalogId, else a legacy bare catalogId the default catalog's
         // schema does not declare, else the surface default.
         string? explicitCatalogId = null;
-        var legacyEnvelope = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string> legacyEnvelope = new(StringComparer.Ordinal);
         if (raw.ContainsKey("@catalogId"))
         {
             explicitCatalogId = A2UIValues.AsString(raw["@catalogId"]) is { Length: > 0 } c
@@ -45,7 +45,7 @@ internal static class ComponentParser
         }
 
         ComponentDefinition? defaultDefinition = null;
-        if (surface.CatalogId is { } surfaceCatalogId && surface.TryGetCatalog(surfaceCatalogId, out var surfaceCatalog))
+        if (surface.CatalogId is { } surfaceCatalogId && surface.TryGetCatalog(surfaceCatalogId, out Catalog? surfaceCatalog))
         {
             surfaceCatalog.Components.TryGetValue(type, out defaultDefinition);
         }
@@ -58,15 +58,15 @@ internal static class ComponentParser
             legacyEnvelope.Add("catalogId");
         }
 
-        var catalogId = explicitCatalogId ?? surface.CatalogId
+        string catalogId = explicitCatalogId ?? surface.CatalogId
             ?? throw new A2UICatalogException(
                 $"Component '{id}' names no @catalogId and surface '{surface.SurfaceId}' has no default catalogId.");
-        if (!surface.TryGetCatalog(catalogId, out var catalog))
+        if (!surface.TryGetCatalog(catalogId, out Catalog? catalog))
         {
             throw new A2UICatalogException($"Catalog not found: {catalogId}");
         }
 
-        if (!catalog.Components.TryGetValue(type, out var definition))
+        if (!catalog.Components.TryGetValue(type, out ComponentDefinition? definition))
         {
             if (validation is not null)
             {
@@ -77,7 +77,7 @@ internal static class ComponentParser
             definition = ComponentDefinition.Unknown(type);
         }
 
-        foreach (var key in EnvelopeKeys)
+        foreach (string key in s_envelopeKeys)
         {
             if (key == "catalogId")
             {
@@ -102,7 +102,7 @@ internal static class ComponentParser
 
         JsonNode? Envelope(string key) => raw.ContainsKey("@" + key) ? raw["@" + key] : legacyEnvelope.Contains(key) ? raw[key] : null;
 
-        var accessibility = Envelope("accessibility");
+        JsonNode? accessibility = Envelope("accessibility");
         if (accessibility is not null and not JsonObject)
         {
             throw new A2UIValidationException($"Component '{id}': '@accessibility' must be an object.");
@@ -110,7 +110,7 @@ internal static class ComponentParser
 
         if (accessibility is JsonObject a11y)
         {
-            foreach (var (key, _) in a11y)
+            foreach ((string key, JsonNode? _) in a11y)
             {
                 if (key is not ("label" or "description" or "live" or "hidden"))
                 {
@@ -118,15 +118,15 @@ internal static class ComponentParser
                 }
             }
 
-            if (validation is not null && SchemaCheck.Validate(a11y, AccessibilitySchema, null) is { } a11yProblem)
+            if (validation is not null && SchemaCheck.Validate(a11y, s_accessibilitySchema, null) is { } a11yProblem)
             {
                 throw new A2UIValidationException($"Component '{id}': '@accessibility' {a11yProblem}.") { Path = "/@accessibility" };
             }
         }
 
-        var metadata = MessageProcessor.ReadMetadata(Envelope("metadata"), surface.SurfaceId, $"component '{id}' @metadata");
+        JsonObject? metadata = MessageProcessor.ReadMetadata(Envelope("metadata"), surface.SurfaceId, $"component '{id}' @metadata");
 
-        var checks = Envelope("checks");
+        JsonNode? checks = Envelope("checks");
         if (checks is not null)
         {
             if (checks is not JsonArray)
@@ -140,7 +140,7 @@ internal static class ComponentParser
             }
         }
 
-        foreach (var required in validation is null ? Enumerable.Empty<string>() : definition.Required)
+        foreach (string required in validation is null ? Enumerable.Empty<string>() : definition.Required)
         {
             if (!raw.ContainsKey(required))
             {
@@ -148,8 +148,8 @@ internal static class ComponentParser
             }
         }
 
-        var properties = new JsonObject();
-        foreach (var (key, value) in raw)
+        JsonObject properties = new();
+        foreach ((string key, JsonNode? value) in raw)
         {
             if (key is "id" or "component" || legacyEnvelope.Contains(key))
             {
@@ -257,12 +257,13 @@ internal static class ComponentParser
         switch (node)
         {
             case JsonObject obj when obj.ContainsKey("@call"):
-                var name = A2UIValues.AsString(obj["@call"]);
-                var args = obj["args"] as JsonObject;
+                string? name = A2UIValues.AsString(obj["@call"]);
+                JsonObject? args = obj["args"] as JsonObject;
                 if (name is null || (!name.StartsWith('@') && !Uax31.IsIdentifier(name)))
                 {
                     throw new A2UIValidationException(
-                        $"Component '{componentId}': function name '{name}' must be a valid UAX #31 identifier.") { Path = pointer + "/@call" };
+                        $"Component '{componentId}': function name '{name}' must be a valid UAX #31 identifier.")
+                    { Path = pointer + "/@call" };
                 }
 
                 if (!name.StartsWith('@'))
@@ -275,21 +276,23 @@ internal static class ComponentParser
                         };
                     }
 
-                    var explicitId = A2UIValues.AsString(obj["catalogId"]);
-                    var catalogId = explicitId ?? surface.CatalogId
+                    string? explicitId = A2UIValues.AsString(obj["catalogId"]);
+                    string catalogId = explicitId ?? surface.CatalogId
                         ?? throw new A2UICatalogException(
-                            $"Component '{componentId}': '{name}' names no catalogId and the surface has no default catalogId.") { Path = pointer };
-                    if (!surface.TryGetCatalog(catalogId, out var catalog))
+                            $"Component '{componentId}': '{name}' names no catalogId and the surface has no default catalogId.")
+                        { Path = pointer };
+                    if (!surface.TryGetCatalog(catalogId, out Catalog? catalog))
                     {
                         throw new A2UICatalogException($"Component '{componentId}': Catalog not found: {catalogId}") { Path = pointer };
                     }
 
-                    if (catalog.Functions.TryGetValue(name, out var function))
+                    if (catalog.Functions.TryGetValue(name, out FunctionDefinition? function))
                     {
                         if (function.AllowedCallers == AllowedCallers.AgentOnly)
                         {
                             throw new A2UIValidationException(
-                                $"Component '{componentId}': function '{name}' is agentOnly and cannot be called by renderer content.") { Path = pointer };
+                                $"Component '{componentId}': function '{name}' is agentOnly and cannot be called by renderer content.")
+                            { Path = pointer };
                         }
 
                         if (args is not null && function.ArgsSchema is { } schema && ArgsSchema.ValidateLiterals(schema, args) is var (argument, problem))
@@ -318,13 +321,14 @@ internal static class ComponentParser
                     else if (validation is { AllowUnknownElements: false })
                     {
                         throw new A2UIValidationException(
-                            $"Component '{componentId}': Unrecognized function '{name}' (catalog '{catalogId}' does not declare it).") { Path = pointer };
+                            $"Component '{componentId}': Unrecognized function '{name}' (catalog '{catalogId}' does not declare it).")
+                        { Path = pointer };
                     }
                 }
 
                 if (args is not null)
                 {
-                    foreach (var (key, value) in args)
+                    foreach ((string key, JsonNode? value) in args)
                     {
                         ValidateCalls(value, componentId, $"{pointer}/args/{Data.JsonPointer.Escape(key)}", surface, validation, depth + 1);
                     }
@@ -332,14 +336,14 @@ internal static class ComponentParser
 
                 break;
             case JsonObject obj:
-                foreach (var (key, value) in obj)
+                foreach ((string key, JsonNode? value) in obj)
                 {
                     ValidateCalls(value, componentId, $"{pointer}/{Data.JsonPointer.Escape(key)}", surface, validation, depth + 1);
                 }
 
                 break;
             case JsonArray arr:
-                for (var i = 0; i < arr.Count; i++)
+                for (int i = 0; i < arr.Count; i++)
                 {
                     ValidateCalls(arr[i], componentId, $"{pointer}/{i}", surface, validation, depth + 1);
                 }
@@ -369,7 +373,7 @@ internal static class ComponentParser
 
                 break;
             case JsonObject obj when obj.ContainsKey("@call"):
-                foreach (var (key, value) in obj)
+                foreach ((string key, JsonNode? value) in obj)
                 {
                     if (key is not ("@call" or "catalogId" or "args"))
                     {
@@ -399,7 +403,7 @@ internal static class ComponentParser
                         throw new A2UIValidationException($"Component '{componentId}': 'args' in '{property}' must be an object.");
                     }
 
-                    foreach (var (_, value) in argsObject)
+                    foreach ((string _, JsonNode? value) in argsObject)
                     {
                         ValidateDynamic(value, componentId, property, depth + 1);
                     }
@@ -407,7 +411,7 @@ internal static class ComponentParser
 
                 break;
             case JsonObject obj:
-                foreach (var (key, value) in obj)
+                foreach ((string key, JsonNode? value) in obj)
                 {
                     if (key.Length > 0 && key[0] == '@' && (key.Length == 1 || key[1] != '@'))
                     {
@@ -420,7 +424,7 @@ internal static class ComponentParser
 
                 break;
             case JsonArray arr:
-                foreach (var item in arr)
+                foreach (JsonNode? item in arr)
                 {
                     ValidateDynamic(item, componentId, property, depth + 1);
                 }

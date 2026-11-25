@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using BlazorA2UI.Text;
 
@@ -11,13 +11,13 @@ namespace BlazorA2UI.Catalogs;
 /// </summary>
 public sealed class Catalog
 {
-    private static readonly HashSet<string> AllowedRootKeys =
+    private static readonly HashSet<string> s_allowedRootKeys =
     [
         "$schema", "$id", "protocolVersion", "title", "description", "catalogId", "instructions",
         "metadata", "components", "functions", "$defs",
     ];
 
-    private static readonly HashSet<string> AllowedCommonRefs =
+    private static readonly HashSet<string> s_allowedCommonRefs =
     [
         "ComponentId", "Child", "ChildList", "DynamicString", "DynamicNumber", "DynamicBoolean",
         "DynamicStringList", "DynamicValue", "AccessibilityAttributes", "CheckRule", "Checkable", "Action",
@@ -44,7 +44,7 @@ public sealed class Catalog
         Components = components.ToDictionary(c => c.Name, StringComparer.Ordinal);
         Functions = functions.ToDictionary(f => f.Name, StringComparer.Ordinal);
 
-        foreach (var name in Components.Keys.Concat(Functions.Keys))
+        foreach (string? name in Components.Keys.Concat(Functions.Keys))
         {
             if (!Uax31.IsIdentifier(name))
             {
@@ -57,7 +57,7 @@ public sealed class Catalog
             throw new A2UICatalogException("The component name 'Surface' is reserved.");
         }
 
-        foreach (var f in Functions.Values)
+        foreach (FunctionDefinition f in Functions.Values)
         {
             if (f.RequiresUserActivation && f.AllowedCallers != AllowedCallers.RendererOnly)
             {
@@ -83,9 +83,9 @@ public sealed class Catalog
     /// <summary>Returns a copy of this catalog with the given implementations attached by function name.</summary>
     public Catalog WithFunctions(IReadOnlyDictionary<string, A2UIFunction> implementations)
     {
-        var functions = Functions.Values.Select(f =>
-            implementations.TryGetValue(f.Name, out var impl) ? f.WithImplementation(impl) : f).ToList();
-        foreach (var (name, _) in implementations)
+        List<FunctionDefinition> functions = Functions.Values.Select(f =>
+            implementations.TryGetValue(f.Name, out A2UIFunction? impl) ? f.WithImplementation(impl) : f).ToList();
+        foreach ((string name, A2UIFunction _) in implementations)
         {
             if (!Functions.ContainsKey(name))
             {
@@ -103,14 +103,14 @@ public sealed class Catalog
     /// <summary>Returns a copy of this catalog with extra component types or functions added.</summary>
     public Catalog Extend(IEnumerable<ComponentDefinition>? components = null, IEnumerable<FunctionDefinition>? functions = null)
     {
-        var comps = Components.Values.ToDictionary(c => c.Name);
-        foreach (var c in components ?? [])
+        Dictionary<string, ComponentDefinition> comps = Components.Values.ToDictionary(c => c.Name);
+        foreach (ComponentDefinition c in components ?? [])
         {
             comps[c.Name] = c;
         }
 
-        var funcs = Functions.Values.ToDictionary(f => f.Name);
-        foreach (var f in functions ?? [])
+        Dictionary<string, FunctionDefinition> funcs = Functions.Values.ToDictionary(f => f.Name);
+        foreach (FunctionDefinition f in functions ?? [])
         {
             funcs[f.Name] = f;
         }
@@ -124,23 +124,23 @@ public sealed class Catalog
     /// <summary>Loads a catalog from its JSON Schema document. Functions are schema-only until implementations are attached.</summary>
     public static Catalog FromJson(JsonObject document)
     {
-        foreach (var (key, _) in document)
+        foreach ((string key, JsonNode? _) in document)
         {
-            if (!AllowedRootKeys.Contains(key))
+            if (!s_allowedRootKeys.Contains(key))
             {
                 throw new A2UICatalogException($"Catalog has an unsupported top-level key '{key}'.");
             }
         }
 
-        var catalogId = document["catalogId"]?.GetValue<string>()
+        string catalogId = document["catalogId"]?.GetValue<string>()
                         ?? throw new A2UICatalogException("Catalog is missing 'catalogId'.");
-        var protocolVersion = document["protocolVersion"]?.GetValue<string>() ?? "0.9";
+        string protocolVersion = document["protocolVersion"]?.GetValue<string>() ?? "0.9";
         CheckRefs(document, catalogId);
 
-        var components = new List<ComponentDefinition>();
+        List<ComponentDefinition> components = new();
         if (document["components"] is JsonObject comps)
         {
-            foreach (var (name, schemaNode) in comps)
+            foreach ((string name, JsonNode? schemaNode) in comps)
             {
                 if (schemaNode is JsonObject schema)
                 {
@@ -149,10 +149,10 @@ public sealed class Catalog
             }
         }
 
-        var functions = new List<FunctionDefinition>();
+        List<FunctionDefinition> functions = new();
         if (document["functions"] is JsonObject funcs)
         {
-            foreach (var (name, schemaNode) in funcs)
+            foreach ((string name, JsonNode? schemaNode) in funcs)
             {
                 if (schemaNode is not JsonObject schema)
                 {
@@ -189,9 +189,9 @@ public sealed class Catalog
         switch (node)
         {
             case JsonObject obj:
-                foreach (var (key, value) in obj)
+                foreach ((string key, JsonNode? value) in obj)
                 {
-                    if (key == "$ref" && value is JsonValue v && v.TryGetValue<string>(out var target))
+                    if (key == "$ref" && value is JsonValue v && v.TryGetValue<string>(out string? target))
                     {
                         if (target.StartsWith('#'))
                         {
@@ -199,7 +199,7 @@ public sealed class Catalog
                         }
 
                         const string prefix = "common_types.json#/$defs/";
-                        if (!target.StartsWith(prefix, StringComparison.Ordinal) || !AllowedCommonRefs.Contains(target[prefix.Length..]))
+                        if (!target.StartsWith(prefix, StringComparison.Ordinal) || !s_allowedCommonRefs.Contains(target[prefix.Length..]))
                         {
                             throw new A2UICatalogException(
                                 $"Catalog '{catalogId}' references '{target}', which is not an allowed $ref target. Catalog references are never fetched.");
@@ -213,7 +213,7 @@ public sealed class Catalog
 
                 break;
             case JsonArray arr:
-                foreach (var item in arr)
+                foreach (JsonNode? item in arr)
                 {
                     CheckRefs(item, catalogId);
                 }
@@ -224,12 +224,12 @@ public sealed class Catalog
 
     private static ComponentDefinition ReadComponent(string name, JsonObject schema)
     {
-        var properties = new HashSet<string>(StringComparer.Ordinal);
-        var propertySchemas = new Dictionary<string, JsonNode?>(StringComparer.Ordinal);
-        var required = new HashSet<string>(StringComparer.Ordinal);
-        var children = new Dictionary<string, ChildReferenceKind>(StringComparer.Ordinal);
-        var nestedKeys = new Dictionary<string, string>(StringComparer.Ordinal);
-        var checkable = false;
+        HashSet<string> properties = new(StringComparer.Ordinal);
+        Dictionary<string, JsonNode?> propertySchemas = new(StringComparer.Ordinal);
+        HashSet<string> required = new(StringComparer.Ordinal);
+        Dictionary<string, ChildReferenceKind> children = new(StringComparer.Ordinal);
+        Dictionary<string, string> nestedKeys = new(StringComparer.Ordinal);
+        bool checkable = false;
 
         // Required keys count only from the schema itself and allOf parts; anyOf/oneOf branches
         // are alternatives, so their required lists do not apply to every instance.
@@ -242,7 +242,7 @@ public sealed class Catalog
 
             if (s["properties"] is JsonObject props)
             {
-                foreach (var (prop, propSchema) in props)
+                foreach ((string prop, JsonNode? propSchema) in props)
                 {
                     if (prop == "component")
                     {
@@ -257,7 +257,7 @@ public sealed class Catalog
 
                     properties.Add(prop);
                     propertySchemas.TryAdd(prop, propSchema);
-                    if (ChildKind(propSchema, out var nestedKey) is { } kind)
+                    if (ChildKind(propSchema, out string? nestedKey) is { } kind)
                     {
                         children[prop] = kind;
                         if (nestedKey is not null)
@@ -270,9 +270,9 @@ public sealed class Catalog
 
             if (mandatory && s["required"] is JsonArray req)
             {
-                foreach (var r2 in req)
+                foreach (JsonNode? r2 in req)
                 {
-                    var n = r2!.GetValue<string>();
+                    string n = r2!.GetValue<string>();
                     if (n != "component")
                     {
                         required.Add(n);
@@ -280,11 +280,11 @@ public sealed class Catalog
                 }
             }
 
-            foreach (var combiner in new[] { "allOf", "anyOf", "oneOf" })
+            foreach (string? combiner in new[] { "allOf", "anyOf", "oneOf" })
             {
                 if (s[combiner] is JsonArray parts)
                 {
-                    foreach (var part in parts.OfType<JsonObject>())
+                    foreach (JsonObject part in parts.OfType<JsonObject>())
                     {
                         Visit(part, mandatory && combiner == "allOf");
                     }
@@ -335,7 +335,7 @@ public sealed class Catalog
 
             if (items["properties"] is JsonObject itemProps)
             {
-                foreach (var (key, inner) in itemProps)
+                foreach ((string key, JsonNode? inner) in itemProps)
                 {
                     if (inner is JsonObject innerSchema && IsIdReference(innerSchema))
                     {

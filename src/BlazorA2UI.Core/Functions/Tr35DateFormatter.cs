@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 
 namespace BlazorA2UI.Functions;
@@ -8,13 +8,13 @@ internal static class Tr35DateFormatter
 {
     public static string Format(DateTimeOffset value, string pattern, CultureInfo culture)
     {
-        var info = culture.DateTimeFormat;
-        var dt = value.DateTime;
-        var sb = new StringBuilder();
-        var i = 0;
+        DateTimeFormatInfo info = culture.DateTimeFormat;
+        DateTime dt = value.DateTime;
+        StringBuilder sb = new();
+        int i = 0;
         while (i < pattern.Length)
         {
-            var c = pattern[i];
+            char c = pattern[i];
             if (c == '\'')
             {
                 if (i + 1 < pattern.Length && pattern[i + 1] == '\'')
@@ -24,7 +24,7 @@ internal static class Tr35DateFormatter
                     continue;
                 }
 
-                var end = pattern.IndexOf('\'', i + 1);
+                int end = pattern.IndexOf('\'', i + 1);
                 if (end < 0)
                 {
                     sb.Append(pattern, i + 1, pattern.Length - i - 1);
@@ -43,7 +43,7 @@ internal static class Tr35DateFormatter
                 continue;
             }
 
-            var count = 1;
+            int count = 1;
             while (i + count < pattern.Length && pattern[i + count] == c)
             {
                 count++;
@@ -105,10 +105,10 @@ internal static class Tr35DateFormatter
             case 's':
                 return Pad(dt.Second, count);
             case 'S':
-            {
-                var fraction = (dt.Ticks % TimeSpan.TicksPerSecond).ToString("0000000", CultureInfo.InvariantCulture);
-                return count <= 7 ? fraction[..count] : fraction.PadRight(count, '0');
-            }
+                {
+                    string fraction = (dt.Ticks % TimeSpan.TicksPerSecond).ToString("0000000", CultureInfo.InvariantCulture);
+                    return count <= 7 ? fraction[..count] : fraction.PadRight(count, '0');
+                }
 
             case 'G':
                 return count == 4 ? "Anno Domini" : "AD";
@@ -117,20 +117,20 @@ internal static class Tr35DateFormatter
             case 'X' when offset == TimeSpan.Zero:
                 return "Z";
             case 'Z' or 'x' or 'X' or 'O' or 'z':
-            {
-                var sign = offset < TimeSpan.Zero ? "-" : "+";
-                var abs = offset.Duration();
-                if (c is 'O' or 'z')
                 {
-                    return $"GMT{sign}{abs.Hours}{(abs.Minutes > 0 ? ":" + Pad(abs.Minutes, 2) : string.Empty)}";
-                }
+                    string sign = offset < TimeSpan.Zero ? "-" : "+";
+                    TimeSpan abs = offset.Duration();
+                    if (c is 'O' or 'z')
+                    {
+                        return $"GMT{sign}{abs.Hours}{(abs.Minutes > 0 ? ":" + Pad(abs.Minutes, 2) : string.Empty)}";
+                    }
 
-                return count is 1 or 2 && c != 'Z'
-                    ? $"{sign}{Pad(abs.Hours, 2)}{(count == 1 && abs.Minutes == 0 ? string.Empty : Pad(abs.Minutes, 2))}"
-                    : count >= 3 && c != 'Z' || count == 5
-                        ? $"{sign}{Pad(abs.Hours, 2)}:{Pad(abs.Minutes, 2)}"
-                        : $"{sign}{Pad(abs.Hours, 2)}{Pad(abs.Minutes, 2)}";
-            }
+                    return count is 1 or 2 && c != 'Z'
+                        ? $"{sign}{Pad(abs.Hours, 2)}{(count == 1 && abs.Minutes == 0 ? string.Empty : Pad(abs.Minutes, 2))}"
+                        : count >= 3 && c != 'Z' || count == 5
+                            ? $"{sign}{Pad(abs.Hours, 2)}:{Pad(abs.Minutes, 2)}"
+                            : $"{sign}{Pad(abs.Hours, 2)}{Pad(abs.Minutes, 2)}";
+                }
 
             default:
                 return new string(c, count);

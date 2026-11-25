@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 
 namespace BlazorA2UI.Functions;
 
@@ -7,9 +7,9 @@ internal static class PluralRules
 {
     public static string Category(double n, CultureInfo culture)
     {
-        var lang = culture.TwoLetterISOLanguageName;
-        var isInt = n == Math.Floor(n);
-        var i = isInt ? (long)Math.Abs(n) : -1;
+        string lang = culture.TwoLetterISOLanguageName;
+        bool isInt = n == Math.Floor(n);
+        long i = isInt ? (long)Math.Abs(n) : -1;
         switch (lang)
         {
             case "ja" or "zh" or "ko" or "th" or "vi" or "id" or "ms" or "tr" or "fa":

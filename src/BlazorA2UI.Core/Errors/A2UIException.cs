@@ -1,4 +1,4 @@
-namespace BlazorA2UI;
+﻿namespace BlazorA2UI;
 
 /// <summary>
 /// Error codes used on the wire (renderer-to-agent <c>error</c> messages and

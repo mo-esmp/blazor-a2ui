@@ -1,4 +1,4 @@
-namespace BlazorA2UI.Processing;
+﻿namespace BlazorA2UI.Processing;
 
 /// <summary>Settings for a <see cref="MessageProcessor"/>.</summary>
 public sealed class A2UIProcessorOptions

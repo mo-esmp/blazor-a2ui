@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json.Nodes;
 using YamlDotNet.RepresentationModel;
 
@@ -10,27 +10,27 @@ namespace BlazorA2UI.Tests.Conformance;
 /// </summary>
 internal static class ConformanceData
 {
-    private static readonly Dictionary<string, List<JsonObject>> Cache = new();
+    private static readonly Dictionary<string, List<JsonObject>> s_cache = new();
 
     public static IReadOnlyList<JsonObject> Load(string file)
     {
-        lock (Cache)
+        lock (s_cache)
         {
-            if (Cache.TryGetValue(file, out var cached))
+            if (s_cache.TryGetValue(file, out List<JsonObject>? cached))
             {
                 return cached;
             }
 
-            var path = Path.Combine(AppContext.BaseDirectory, "Conformance", "data", file);
-            var yaml = new YamlStream();
-            using (var reader = new StreamReader(path))
+            string path = Path.Combine(AppContext.BaseDirectory, "Conformance", "data", file);
+            YamlStream yaml = new();
+            using (StreamReader reader = new(path))
             {
                 yaml.Load(reader);
             }
 
-            var root = (JsonArray)ToJson(yaml.Documents[0].RootNode)!;
-            var cases = root.OfType<JsonObject>().ToList();
-            Cache[file] = cases;
+            JsonArray root = (JsonArray)ToJson(yaml.Documents[0].RootNode)!;
+            List<JsonObject> cases = root.OfType<JsonObject>().ToList();
+            s_cache[file] = cases;
             return cases;
         }
     }
@@ -46,64 +46,64 @@ internal static class ConformanceData
         switch (node)
         {
             case YamlMappingNode map:
-            {
-                var obj = new JsonObject();
-                foreach (var (key, value) in map.Children)
                 {
-                    obj[((YamlScalarNode)key).Value!] = ToJson(value);
-                }
+                    JsonObject obj = new();
+                    foreach ((YamlNode? key, YamlNode? value) in map.Children)
+                    {
+                        obj[((YamlScalarNode)key).Value!] = ToJson(value);
+                    }
 
-                return obj;
-            }
+                    return obj;
+                }
 
             case YamlSequenceNode seq:
-            {
-                var arr = new JsonArray();
-                foreach (var item in seq.Children)
                 {
-                    arr.Add(ToJson(item));
-                }
+                    JsonArray arr = new();
+                    foreach (YamlNode item in seq.Children)
+                    {
+                        arr.Add(ToJson(item));
+                    }
 
-                return arr;
-            }
+                    return arr;
+                }
 
             case YamlScalarNode scalar:
-            {
-                var text = scalar.Value ?? string.Empty;
-                if (scalar.Style is not YamlDotNet.Core.ScalarStyle.Plain)
                 {
+                    string text = scalar.Value ?? string.Empty;
+                    if (scalar.Style is not YamlDotNet.Core.ScalarStyle.Plain)
+                    {
+                        return JsonValue.Create(text);
+                    }
+
+                    switch (text)
+                    {
+                        case "null" or "~" or "":
+                            return null;
+                        case "true":
+                            return JsonValue.Create(true);
+                        case "false":
+                            return JsonValue.Create(false);
+                        case ".nan" or ".NaN" or ".NAN":
+                            return JsonValue.Create(double.NaN);
+                        case ".inf" or "+.inf" or ".Inf" or "+.Inf":
+                            return JsonValue.Create(double.PositiveInfinity);
+                        case "-.inf" or "-.Inf":
+                            return JsonValue.Create(double.NegativeInfinity);
+                    }
+
+                    if (long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out long l))
+                    {
+                        return JsonValue.Create(l);
+                    }
+
+                    if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double d)
+                        && (char.IsAsciiDigit(text[0]) || text[0] is '-' or '+' or '.'))
+                    {
+                        return JsonValue.Create(d);
+                    }
+
                     return JsonValue.Create(text);
                 }
-
-                switch (text)
-                {
-                    case "null" or "~" or "":
-                        return null;
-                    case "true":
-                        return JsonValue.Create(true);
-                    case "false":
-                        return JsonValue.Create(false);
-                    case ".nan" or ".NaN" or ".NAN":
-                        return JsonValue.Create(double.NaN);
-                    case ".inf" or "+.inf" or ".Inf" or "+.Inf":
-                        return JsonValue.Create(double.PositiveInfinity);
-                    case "-.inf" or "-.Inf":
-                        return JsonValue.Create(double.NegativeInfinity);
-                }
-
-                if (long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var l))
-                {
-                    return JsonValue.Create(l);
-                }
-
-                if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)
-                    && (char.IsAsciiDigit(text[0]) || text[0] is '-' or '+' or '.'))
-                {
-                    return JsonValue.Create(d);
-                }
-
-                return JsonValue.Create(text);
-            }
 
             default:
                 return null;

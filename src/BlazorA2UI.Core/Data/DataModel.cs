@@ -1,4 +1,4 @@
-using System.Text.Json.Nodes;
+﻿using System.Text.Json.Nodes;
 
 namespace BlazorA2UI.Data;
 
@@ -31,21 +31,21 @@ public sealed class DataModel
     public bool TryGet(string path, out JsonNode? value) => TryGet(JsonPointer.Parse(path), out value);
 
     /// <summary>Reads the value at <paramref name="path"/>, or null when absent.</summary>
-    public JsonNode? Get(string path) => TryGet(path, out var value) ? value : null;
+    public JsonNode? Get(string path) => TryGet(path, out JsonNode? value) ? value : null;
 
     internal bool TryGet(IReadOnlyList<string> segments, out JsonNode? value) => TryGet(_root, segments, out value);
 
     private static bool TryGet(JsonNode? start, IReadOnlyList<string> segments, out JsonNode? value)
     {
-        var current = start;
-        foreach (var segment in segments)
+        JsonNode? current = start;
+        foreach (string segment in segments)
         {
             switch (current)
             {
-                case JsonObject obj when obj.TryGetPropertyValue(segment, out var child):
+                case JsonObject obj when obj.TryGetPropertyValue(segment, out JsonNode? child):
                     current = child;
                     break;
-                case JsonArray arr when TryParseIndex(segment, out var index) && index < arr.Count:
+                case JsonArray arr when TryParseIndex(segment, out int index) && index < arr.Count:
                     current = arr[index];
                     break;
                 default:
@@ -64,10 +64,10 @@ public sealed class DataModel
     /// </summary>
     public void Set(string path, JsonNode? value)
     {
-        var segments = JsonPointer.Parse(path);
-        var copy = value?.DeepClone();
-        TryGet(segments, out var oldValue);
-        var existed = TryGet(segments, out _);
+        IReadOnlyList<string> segments = JsonPointer.Parse(path);
+        JsonNode? copy = value?.DeepClone();
+        TryGet(segments, out JsonNode? oldValue);
+        bool existed = TryGet(segments, out _);
 
         if (segments.Count == 0)
         {
@@ -77,15 +77,15 @@ public sealed class DataModel
         }
 
         CheckWritable(segments, path);
-        var parent = Vivify(segments);
-        var last = segments[^1];
+        JsonNode parent = Vivify(segments);
+        string last = segments[^1];
         switch (parent)
         {
             case JsonObject obj:
                 obj[last] = copy;
                 break;
             case JsonArray arr:
-                var index = ParseWriteIndex(last, path);
+                int index = ParseWriteIndex(last, path);
                 while (arr.Count <= index)
                 {
                     arr.Add(null);
@@ -101,8 +101,8 @@ public sealed class DataModel
     /// <summary>Removes the value at <paramref name="path"/>. Missing paths are a no-op.</summary>
     public void Delete(string path)
     {
-        var segments = JsonPointer.Parse(path);
-        if (!TryGet(segments, out var oldValue))
+        IReadOnlyList<string> segments = JsonPointer.Parse(path);
+        if (!TryGet(segments, out JsonNode? oldValue))
         {
             return;
         }
@@ -114,14 +114,14 @@ public sealed class DataModel
             return;
         }
 
-        TryGet(segments.Take(segments.Count - 1).ToList(), out var parent);
-        var last = segments[^1];
+        TryGet(segments.Take(segments.Count - 1).ToList(), out JsonNode? parent);
+        string last = segments[^1];
         switch (parent)
         {
             case JsonObject obj:
                 obj.Remove(last);
                 break;
-            case JsonArray arr when TryParseIndex(last, out var index) && index < arr.Count:
+            case JsonArray arr when TryParseIndex(last, out int index) && index < arr.Count:
                 // Detach the old node first so it can still be inspected for observers.
                 arr[index] = null;
                 arr.RemoveAt(index);
@@ -139,7 +139,7 @@ public sealed class DataModel
     /// </summary>
     public IDisposable Observe(string path, Action callback)
     {
-        var observer = new Observer(this, JsonPointer.Parse(path), callback);
+        Observer observer = new(this, JsonPointer.Parse(path), callback);
         _observers.Add(observer);
         return observer;
     }
@@ -162,11 +162,11 @@ public sealed class DataModel
         }
 
         JsonNode? current = _root ?? new JsonObject();
-        var creating = false; // true once the walk has left the existing data
-        for (var i = 0; i < segments.Count; i++)
+        bool creating = false; // true once the walk has left the existing data
+        for (int i = 0; i < segments.Count; i++)
         {
-            var segment = segments[i];
-            var isLast = i == segments.Count - 1;
+            string segment = segments[i];
+            bool isLast = i == segments.Count - 1;
             if (creating)
             {
                 // A created container is a list exactly when its segment is an index.
@@ -185,7 +185,7 @@ public sealed class DataModel
                     obj.TryGetPropertyValue(segment, out child);
                     break;
                 case JsonArray arr:
-                    var index = ParseWriteIndex(segment, path);
+                    int index = ParseWriteIndex(segment, path);
                     child = index < arr.Count ? arr[index] : null;
                     break;
             }
@@ -212,7 +212,7 @@ public sealed class DataModel
 
     private JsonNode Vivify(IReadOnlyList<string> segments)
     {
-        var path = JsonPointer.Format(segments);
+        string path = JsonPointer.Format(segments);
         if (_root is null)
         {
             _root = new JsonObject();
@@ -223,51 +223,51 @@ public sealed class DataModel
             throw new A2UIDataException($"Cannot set path '{path}': the root is not a container.");
         }
 
-        var current = _root;
-        for (var i = 0; i < segments.Count - 1; i++)
+        JsonNode current = _root;
+        for (int i = 0; i < segments.Count - 1; i++)
         {
-            var segment = segments[i];
-            var nextIsIndex = TryParseIndex(segments[i + 1], out _);
+            string segment = segments[i];
+            bool nextIsIndex = TryParseIndex(segments[i + 1], out _);
             switch (current)
             {
                 case JsonObject obj:
-                {
-                    obj.TryGetPropertyValue(segment, out var child);
-                    if (child is null)
                     {
-                        child = nextIsIndex ? new JsonArray() : new JsonObject();
-                        obj[segment] = child;
-                    }
-                    else if (child is not JsonObject && child is not JsonArray)
-                    {
-                        throw new A2UIDataException($"Cannot set path '{path}': '{segment}' holds a primitive value.");
-                    }
+                        obj.TryGetPropertyValue(segment, out JsonNode? child);
+                        if (child is null)
+                        {
+                            child = nextIsIndex ? new JsonArray() : new JsonObject();
+                            obj[segment] = child;
+                        }
+                        else if (child is not JsonObject && child is not JsonArray)
+                        {
+                            throw new A2UIDataException($"Cannot set path '{path}': '{segment}' holds a primitive value.");
+                        }
 
-                    current = child;
-                    break;
-                }
+                        current = child;
+                        break;
+                    }
                 case JsonArray arr:
-                {
-                    var index = ParseWriteIndex(segment, path);
-                    while (arr.Count <= index)
                     {
-                        arr.Add(null);
-                    }
+                        int index = ParseWriteIndex(segment, path);
+                        while (arr.Count <= index)
+                        {
+                            arr.Add(null);
+                        }
 
-                    var child = arr[index];
-                    if (child is null)
-                    {
-                        child = nextIsIndex ? new JsonArray() : new JsonObject();
-                        arr[index] = child;
-                    }
-                    else if (child is not JsonObject && child is not JsonArray)
-                    {
-                        throw new A2UIDataException($"Cannot set path '{path}': index {index} holds a primitive value.");
-                    }
+                        JsonNode? child = arr[index];
+                        if (child is null)
+                        {
+                            child = nextIsIndex ? new JsonArray() : new JsonObject();
+                            arr[index] = child;
+                        }
+                        else if (child is not JsonObject && child is not JsonArray)
+                        {
+                            throw new A2UIDataException($"Cannot set path '{path}': index {index} holds a primitive value.");
+                        }
 
-                    current = child;
-                    break;
-                }
+                        current = child;
+                        break;
+                    }
             }
         }
 
@@ -281,7 +281,7 @@ public sealed class DataModel
 
     private static int ParseWriteIndex(string segment, string path)
     {
-        if (!TryParseIndex(segment, out var index))
+        if (!TryParseIndex(segment, out int index))
         {
             throw new A2UIDataException($"Cannot set path '{path}': non-numeric segment '{segment}' addresses a list.");
         }
@@ -308,7 +308,7 @@ public sealed class DataModel
             return false;
         }
 
-        foreach (var c in segment)
+        foreach (char c in segment)
         {
             if (!char.IsAsciiDigit(c))
             {
@@ -327,7 +327,7 @@ public sealed class DataModel
             return;
         }
 
-        foreach (var observer in _observers.ToArray())
+        foreach (Observer observer in _observers.ToArray())
         {
             if (JsonPointer.IsSameOrAncestor(observer.Segments, segments))
             {
@@ -335,9 +335,9 @@ public sealed class DataModel
             }
             else if (JsonPointer.IsSameOrAncestor(segments, observer.Segments))
             {
-                var relative = observer.Segments.Skip(segments.Count).ToList();
-                var hadOld = existed & TryGet(oldValue, relative, out var oldChild);
-                var hasNew = exists & TryGet(newValue, relative, out var newChild);
+                List<string> relative = observer.Segments.Skip(segments.Count).ToList();
+                bool hadOld = existed & TryGet(oldValue, relative, out JsonNode? oldChild);
+                bool hasNew = exists & TryGet(newValue, relative, out JsonNode? newChild);
                 if (hadOld != hasNew || !JsonNode.DeepEquals(oldChild, newChild))
                 {
                     observer.Callback();

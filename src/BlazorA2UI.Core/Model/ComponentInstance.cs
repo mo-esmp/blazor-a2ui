@@ -1,4 +1,4 @@
-using System.Text.Json.Nodes;
+﻿using System.Text.Json.Nodes;
 using BlazorA2UI.Catalogs;
 
 namespace BlazorA2UI.Model;
@@ -66,19 +66,19 @@ public sealed class ComponentInstance
     /// </summary>
     public IEnumerable<(string Id, string Pointer)> ChildReferences(bool includeTemplates = true)
     {
-        foreach (var (prop, kind) in Definition.ChildProperties)
+        foreach ((string prop, ChildReferenceKind kind) in Definition.ChildProperties)
         {
-            var value = Properties[prop];
-            var basePointer = "/" + Data.JsonPointer.Escape(prop);
+            JsonNode? value = Properties[prop];
+            string basePointer = "/" + Data.JsonPointer.Escape(prop);
             switch (kind)
             {
-                case ChildReferenceKind.Single when value is JsonValue v && v.TryGetValue<string>(out var id):
+                case ChildReferenceKind.Single when value is JsonValue v && v.TryGetValue<string>(out string? id):
                     yield return (id, basePointer);
                     break;
                 case ChildReferenceKind.List when value is JsonArray arr:
-                    for (var i = 0; i < arr.Count; i++)
+                    for (int i = 0; i < arr.Count; i++)
                     {
-                        if (arr[i] is JsonValue iv && iv.TryGetValue<string>(out var childId))
+                        if (arr[i] is JsonValue iv && iv.TryGetValue<string>(out string? childId))
                         {
                             yield return (childId, $"{basePointer}/{i}");
                         }
@@ -88,14 +88,14 @@ public sealed class ComponentInstance
                 case ChildReferenceKind.List when includeTemplates
                                                   && value is JsonObject template
                                                   && template["componentId"] is JsonValue t
-                                                  && t.TryGetValue<string>(out var templateId):
+                                                  && t.TryGetValue<string>(out string? templateId):
                     yield return (templateId, basePointer + "/componentId");
                     break;
                 case ChildReferenceKind.NestedSingle when value is JsonArray items:
-                    var nestedKey = Definition.NestedChildKeys.GetValueOrDefault(prop, "child");
-                    for (var i = 0; i < items.Count; i++)
+                    string nestedKey = Definition.NestedChildKeys.GetValueOrDefault(prop, "child");
+                    for (int i = 0; i < items.Count; i++)
                     {
-                        if (items[i] is JsonObject item && item[nestedKey] is JsonValue nv && nv.TryGetValue<string>(out var nestedId))
+                        if (items[i] is JsonObject item && item[nestedKey] is JsonValue nv && nv.TryGetValue<string>(out string? nestedId))
                         {
                             yield return (nestedId, $"{basePointer}/{i}/{Data.JsonPointer.Escape(nestedKey)}");
                         }

@@ -1,4 +1,4 @@
-// Ported from the A2UI TypeScript web core (typescript/core/web_core/src/expressions/expression_parser.ts),
+﻿// Ported from the A2UI TypeScript web core (typescript/core/web_core/src/expressions/expression_parser.ts),
 // Copyright 2024 Google LLC, licensed under the Apache License, Version 2.0.
 // See THIRD-PARTY-NOTICES.md.
 
@@ -37,7 +37,7 @@ public static class ExpressionParser
                 $"Expression template length ({input.Length}) exceeds maximum limit ({MaxTemplateLength})");
         }
 
-        var parts = new List<JsonNode?>();
+        List<JsonNode?> parts = new();
         if (input.Length == 0)
         {
             return parts;
@@ -49,8 +49,8 @@ public static class ExpressionParser
             return parts;
         }
 
-        var scanner = new Scanner(input);
-        var literal = new StringBuilder();
+        Scanner scanner = new(input);
+        StringBuilder literal = new();
         while (!scanner.IsAtEnd)
         {
             if (parts.Count >= MaxParts)
@@ -61,9 +61,9 @@ public static class ExpressionParser
             if (scanner.Matches("${"))
             {
                 scanner.Advance(2);
-                var content = ExtractInterpolationContent(scanner);
-                var parsed = ParseExpression(content, depth + 1);
-                if (parsed is JsonValue v && v.TryGetValue<string>(out var s))
+                string content = ExtractInterpolationContent(scanner);
+                JsonNode? parsed = ParseExpression(content, depth + 1);
+                if (parsed is JsonValue v && v.TryGetValue<string>(out string? s))
                 {
                     // Literal results (including the empty result of null) merge into the surrounding text.
                     literal.Append(s);
@@ -100,11 +100,11 @@ public static class ExpressionParser
 
     private static string ExtractInterpolationContent(Scanner scanner)
     {
-        var start = scanner.Pos;
-        var balance = 1;
+        int start = scanner.Pos;
+        int balance = 1;
         while (!scanner.IsAtEnd && balance > 0)
         {
-            var c = scanner.Advance();
+            string c = scanner.Advance();
             if (c == "{")
             {
                 balance++;
@@ -117,7 +117,7 @@ public static class ExpressionParser
             {
                 while (!scanner.IsAtEnd)
                 {
-                    var d = scanner.Advance();
+                    string d = scanner.Advance();
                     if (d == "\\")
                     {
                         scanner.Advance();
@@ -147,8 +147,8 @@ public static class ExpressionParser
             return "";
         }
 
-        var scanner = new Scanner(expr);
-        var result = ParseExpressionInternal(scanner, depth);
+        Scanner scanner = new(expr);
+        JsonNode? result = ParseExpressionInternal(scanner, depth);
         if (!scanner.IsAtEnd)
         {
             throw new A2UIExpressionException(
@@ -174,7 +174,7 @@ public static class ExpressionParser
         if (scanner.Matches("${"))
         {
             scanner.Advance(2);
-            var content = ExtractInterpolationContent(scanner);
+            string content = ExtractInterpolationContent(scanner);
             return ParseExpression(content, depth + 1);
         }
 
@@ -203,7 +203,7 @@ public static class ExpressionParser
             return "";
         }
 
-        var token = ScanPathOrIdentifier(scanner);
+        string token = ScanPathOrIdentifier(scanner);
         scanner.SkipWhitespace();
         if (scanner.Peek() == "(")
         {
@@ -225,10 +225,10 @@ public static class ExpressionParser
 
     private static string ScanPathOrIdentifier(Scanner scanner)
     {
-        var start = scanner.Pos;
+        int start = scanner.Pos;
         if (scanner.Peek() == "@")
         {
-            var next = scanner.Peek(1);
+            string next = scanner.Peek(1);
             if (next.Length != 1 || !(char.IsAsciiLetter(next[0]) || next[0] == '_'))
             {
                 throw new A2UIExpressionException("Invalid identifier starting with '@' in expression");
@@ -237,7 +237,7 @@ public static class ExpressionParser
             scanner.Advance();
             while (!scanner.IsAtEnd)
             {
-                var c = scanner.Peek();
+                string c = scanner.Peek();
                 if (c.Length == 1 && (char.IsAsciiLetterOrDigit(c[0]) || c[0] == '_'))
                 {
                     scanner.Advance();
@@ -253,7 +253,7 @@ public static class ExpressionParser
 
         while (!scanner.IsAtEnd)
         {
-            var c = scanner.Peek();
+            string c = scanner.Peek();
             if (IsIdContinue(c) || c is "/" or "." or "-")
             {
                 scanner.Advance();
@@ -271,16 +271,16 @@ public static class ExpressionParser
     {
         scanner.Advance(); // (
         scanner.SkipWhitespace();
-        var args = new JsonObject();
+        JsonObject args = new();
         while (!scanner.IsAtEnd && scanner.Peek() != ")")
         {
-            var argStart = scanner.Pos;
+            int argStart = scanner.Pos;
             while (!scanner.IsAtEnd && IsIdContinue(scanner.Peek()))
             {
                 scanner.Advance();
             }
 
-            var argName = scanner.Input[argStart..scanner.Pos];
+            string argName = scanner.Input[argStart..scanner.Pos];
             scanner.SkipWhitespace();
             if (scanner.Peek() != ":")
             {
@@ -309,11 +309,11 @@ public static class ExpressionParser
 
     private static string ParseStringLiteral(Scanner scanner)
     {
-        var quote = scanner.Advance();
-        var sb = new StringBuilder();
+        string quote = scanner.Advance();
+        StringBuilder sb = new();
         while (!scanner.IsAtEnd)
         {
-            var c = scanner.Advance();
+            string c = scanner.Advance();
             if (c == "\\")
             {
                 if (scanner.IsAtEnd)
@@ -321,7 +321,7 @@ public static class ExpressionParser
                     break;
                 }
 
-                var next = scanner.Advance();
+                string next = scanner.Advance();
                 sb.Append(next switch { "n" => "\n", "t" => "\t", "r" => "\r", _ => next });
             }
             else if (c == quote)
@@ -339,7 +339,7 @@ public static class ExpressionParser
 
     private static bool IsNumberStart(Scanner scanner)
     {
-        var offset = scanner.Peek() is "-" or "+" ? 1 : 0;
+        int offset = scanner.Peek() is "-" or "+" ? 1 : 0;
         if (IsDigit(scanner.Peek(offset)))
         {
             return true;
@@ -348,12 +348,12 @@ public static class ExpressionParser
         return scanner.Peek(offset) == "." && IsDigit(scanner.Peek(offset + 1));
     }
 
-    private static readonly System.Text.RegularExpressions.Regex NumberLiteral =
+    private static readonly System.Text.RegularExpressions.Regex s_numberLiteral =
         new(@"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private static JsonNode ParseNumberLiteral(Scanner scanner)
     {
-        var start = scanner.Pos;
+        int start = scanner.Pos;
         if (scanner.Peek() is "-" or "+")
         {
             scanner.Advance();
@@ -378,13 +378,13 @@ public static class ExpressionParser
             }
         }
 
-        var text = scanner.Input[start..scanner.Pos];
-        if (!NumberLiteral.IsMatch(text))
+        string text = scanner.Input[start..scanner.Pos];
+        if (!s_numberLiteral.IsMatch(text))
         {
             throw new A2UIExpressionException($"Invalid number literal: '{text}'");
         }
 
-        var value = double.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture);
+        double value = double.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture);
         if (!double.IsFinite(value))
         {
             throw new A2UIExpressionException($"Number literal is out of range: '{text}'");
@@ -396,7 +396,7 @@ public static class ExpressionParser
     private static bool IsDigit(string c) => c.Length == 1 && char.IsAsciiDigit(c[0]);
 
     private static bool IsIdContinue(string c) =>
-        c.Length > 0 && Rune.TryGetRuneAt(c, 0, out var rune) && rune.Utf16SequenceLength == c.Length && Uax31.IsXidContinue(rune);
+        c.Length > 0 && Rune.TryGetRuneAt(c, 0, out Rune rune) && rune.Utf16SequenceLength == c.Length && Uax31.IsXidContinue(rune);
 
     private sealed class Scanner(string input)
     {
@@ -409,20 +409,20 @@ public static class ExpressionParser
         /// <summary>Returns the code point at the offset (in code points, approximated as UTF-16 units past the first).</summary>
         public string Peek(int offset = 0)
         {
-            var target = Pos + offset;
+            int target = Pos + offset;
             if (target >= Input.Length)
             {
                 return "\0";
             }
 
-            return Rune.TryGetRuneAt(Input, target, out var rune) ? rune.ToString() : Input[target].ToString();
+            return Rune.TryGetRuneAt(Input, target, out Rune rune) ? rune.ToString() : Input[target].ToString();
         }
 
         public string Advance(int? count = null)
         {
-            var step = count ?? (IsAtEnd ? 1 : Peek().Length);
-            var end = Math.Min(Pos + step, Input.Length);
-            var text = Input[Pos..end];
+            int step = count ?? (IsAtEnd ? 1 : Peek().Length);
+            int end = Math.Min(Pos + step, Input.Length);
+            string text = Input[Pos..end];
             Pos += step;
             return text;
         }
@@ -436,7 +436,7 @@ public static class ExpressionParser
                 return false;
             }
 
-            var next = Peek(keyword.Length);
+            string next = Peek(keyword.Length);
             if (next != "\0" && IsIdContinue(next))
             {
                 return false;

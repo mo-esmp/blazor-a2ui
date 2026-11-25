@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json.Nodes;
 using BlazorA2UI.Functions;
 
@@ -7,9 +7,9 @@ namespace BlazorA2UI.Catalogs;
 /// <summary>The A2UI v1.0 basic catalog, with renderer-side implementations of its functions.</summary>
 public static class BasicCatalog
 {
-    private static readonly Lazy<JsonObject> Document = new(() =>
+    private static readonly Lazy<JsonObject> s_document = new(() =>
     {
-        using var stream = typeof(BasicCatalog).Assembly.GetManifestResourceStream("BlazorA2UI.Catalogs.Basic.catalog.json")
+        using Stream stream = typeof(BasicCatalog).Assembly.GetManifestResourceStream("BlazorA2UI.Catalogs.Basic.catalog.json")
                            ?? throw new InvalidOperationException("The basic catalog resource is missing.");
         return (JsonObject)JsonNode.Parse(stream)!;
     });
@@ -18,10 +18,10 @@ public static class BasicCatalog
     public const string CatalogId = A2UIProtocol.BasicCatalogId;
 
     /// <summary>The basic catalog's JSON Schema document (a copy).</summary>
-    public static JsonObject GetDocument() => (JsonObject)Document.Value.DeepClone();
+    public static JsonObject GetDocument() => (JsonObject)s_document.Value.DeepClone();
 
     /// <summary>Creates the basic catalog with every function implemented.</summary>
     /// <param name="culture">Culture for number, currency, date and plural formatting. Defaults to the current culture.</param>
     public static Catalog Create(CultureInfo? culture = null) =>
-        Catalog.FromJson(Document.Value).WithFunctions(BasicFunctions.Create(culture));
+        Catalog.FromJson(s_document.Value).WithFunctions(BasicFunctions.Create(culture));
 }

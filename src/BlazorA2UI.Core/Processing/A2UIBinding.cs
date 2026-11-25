@@ -1,4 +1,4 @@
-using System.Text.Json.Nodes;
+﻿using System.Text.Json.Nodes;
 using BlazorA2UI.Evaluation;
 
 namespace BlazorA2UI.Processing;
@@ -42,13 +42,13 @@ public sealed class A2UIBinding
     /// <summary>Evaluates the expression again and reports errors that are new for this binding.</summary>
     public JsonNode? Refresh()
     {
-        Value = Surface.Evaluate(Expression, Context, out var pending, out var errors, Mode, _requestedAgentCalls);
+        Value = Surface.Evaluate(Expression, Context, out bool pending, out IReadOnlyList<A2UIException>? errors, Mode, _requestedAgentCalls);
         IsPending = pending;
         Errors = errors;
-        var current = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var error in errors)
+        HashSet<string> current = new(StringComparer.Ordinal);
+        foreach (A2UIException error in errors)
         {
-            var key = $"{error.Code}|{error.Message}";
+            string key = $"{error.Code}|{error.Message}";
             current.Add(key);
             if (!_reported.Contains(key) && !Surface.IsDeleted)
             {

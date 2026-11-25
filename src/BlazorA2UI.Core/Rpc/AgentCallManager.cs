@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using BlazorA2UI.Evaluation;
@@ -25,11 +25,11 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
 
     public JsonNode? GetOrStart(string catalogId, string name, JsonObject args, ISet<string>? requested, out bool pending)
     {
-        var key = CacheKey(catalogId, name, args);
+        string key = CacheKey(catalogId, name, args);
         ReactiveEntry? entry;
         lock (_gate)
         {
-            var askedBefore = requested is null || requested.Contains(key);
+            bool askedBefore = requested is null || requested.Contains(key);
             requested?.Add(key);
             if (_reactive.TryGetValue(key, out entry) && entry.Call!.Task.IsFaulted && !askedBefore)
             {
@@ -50,7 +50,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
             }
         }
 
-        var task = entry.Call!.Task;
+        Task<JsonNode?> task = entry.Call!.Task;
         if (!task.IsCompleted)
         {
             pending = true;
@@ -63,7 +63,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
             return task.Result?.DeepClone();
         }
 
-        var error = task.Exception?.GetBaseException() as A2UIException
+        A2UIException error = task.Exception?.GetBaseException() as A2UIException
                     ?? new A2UIExpressionException($"The agent call to '{name}' failed.");
         throw error.Code == A2UIErrorCodes.Cancelled
             ? new A2UIException(A2UIErrorCodes.Cancelled, error.Message)
@@ -72,8 +72,8 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
 
     public async Task<JsonNode?> CallAsync(string catalogId, string name, JsonObject args, CancellationToken cancellationToken)
     {
-        var call = Send(catalogId, name, args);
-        using var registration = cancellationToken.Register(() => call.Cancel("The action was cancelled."));
+        PendingCall call = Send(catalogId, name, args);
+        using CancellationTokenRegistration registration = cancellationToken.Register(() => call.Cancel("The action was cancelled."));
         try
         {
             return await call.Task.ConfigureAwait(false);
@@ -136,7 +136,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
             _reactive.Clear();
         }
 
-        foreach (var call in calls)
+        foreach (PendingCall call in calls)
         {
             call.Cancel(reason);
         }
@@ -144,13 +144,13 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
 
     private PendingCall Send(string catalogId, string name, JsonObject args)
     {
-        var processor = _surface.Processor;
+        MessageProcessor processor = _surface.Processor;
         if (!processor.HasOutbound)
         {
             throw new A2UIExpressionException($"Function '{name}' must run on the agent, but the renderer has no connection to the agent.");
         }
 
-        var call = new PendingCall($"fc_{Guid.NewGuid():N}");
+        PendingCall call = new($"fc_{Guid.NewGuid():N}");
         lock (_gate)
         {
             if (_pending.Count >= processor.Options.MaxPendingAgentCalls)
@@ -161,7 +161,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
             _pending[call.FunctionCallId] = call;
         }
 
-        var timeout = processor.Options.AgentCallTimeout;
+        TimeSpan timeout = processor.Options.AgentCallTimeout;
         if (timeout > TimeSpan.Zero && timeout != Timeout.InfiniteTimeSpan)
         {
             _ = Task.Delay(timeout).ContinueWith(
@@ -181,7 +181,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
                 TaskScheduler.Default);
         }
 
-        var message = new JsonObject
+        JsonObject message = new()
         {
             ["version"] = A2UIProtocol.Version,
             ["callAgentFunction"] = new JsonObject
@@ -222,7 +222,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
 
     internal static string CacheKey(string catalogId, string name, JsonObject args)
     {
-        var sb = new StringBuilder();
+        StringBuilder sb = new();
         sb.Append(catalogId).Append('\n').Append(name).Append('\n');
         WriteCanonical(args, sb);
         return sb.ToString();
@@ -234,8 +234,8 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         {
             case JsonObject obj:
                 sb.Append('{');
-                var first = true;
-                foreach (var (key, value) in obj.OrderBy(p => p.Key, StringComparer.Ordinal))
+                bool first = true;
+                foreach ((string key, JsonNode? value) in obj.OrderBy(p => p.Key, StringComparer.Ordinal))
                 {
                     if (!first)
                     {
@@ -251,7 +251,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
                 break;
             case JsonArray arr:
                 sb.Append('[');
-                for (var i = 0; i < arr.Count; i++)
+                for (int i = 0; i < arr.Count; i++)
                 {
                     if (i > 0)
                     {

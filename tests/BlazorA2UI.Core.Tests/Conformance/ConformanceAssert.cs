@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using BlazorA2UI.Evaluation;
 using BlazorA2UI.Processing;
@@ -12,9 +12,9 @@ internal static class ConformanceAssert
     /// <summary>Checks an error against a case's <c>expectError</c> category and message fragment.</summary>
     public static void Error(JsonObject expected, Exception? actual, string name)
     {
-        var category = Str(expected["category"]);
+        string? category = Str(expected["category"]);
         Assert.True(actual is not null, $"{name}: expected a {category} error but none was raised");
-        var code = (actual as A2UIException)?.Code;
+        string? code = (actual as A2UIException)?.Code;
         string[] accepted = category switch
         {
             "DataError" => [A2UIErrorCodes.DataError],
@@ -46,8 +46,8 @@ internal static class ConformanceAssert
     public static bool MessageMatches(string expected, string actual)
     {
         static string Norm(string m) => m.ToLowerInvariant().Replace('"', '\'').Replace("','", "', '", StringComparison.Ordinal);
-        var e = Norm(expected);
-        var a = Norm(actual);
+        string e = Norm(expected);
+        string a = Norm(actual);
         return a.Contains(e, StringComparison.Ordinal)
                || e.Contains("orphan", StringComparison.Ordinal) && (a.Contains("orphan", StringComparison.Ordinal) || a.Contains("not reachable", StringComparison.Ordinal))
                || e.Contains("circular", StringComparison.Ordinal) && (a.Contains("circular", StringComparison.Ordinal) || a.Contains("self-reference", StringComparison.Ordinal))
@@ -90,17 +90,17 @@ internal static class ConformanceAssert
         IReadOnlyDictionary<string, ProcessingConformanceTests.RenderedNode> rendered,
         string name)
     {
-        foreach (var check in new[] { "isValid", "validationErrors", "validationResults", "validationResult" })
+        foreach (string? check in new[] { "isValid", "validationErrors", "validationResults", "validationResult" })
         {
             if (expectedSurface[check] is not JsonObject perComponent)
             {
                 continue;
             }
 
-            foreach (var (key, expectedValue) in perComponent)
+            foreach ((string key, JsonNode? expectedValue) in perComponent)
             {
-                Assert.True(rendered.TryGetValue(key, out var r), $"{name}: component instance '{key}' was not rendered");
-                var outcome = surface.EvaluateChecks(r!.Component, r.Context);
+                Assert.True(rendered.TryGetValue(key, out ProcessingConformanceTests.RenderedNode? r), $"{name}: component instance '{key}' was not rendered");
+                CheckOutcome outcome = surface.EvaluateChecks(r!.Component, r.Context);
                 switch (check)
                 {
                     case "isValid":
@@ -113,8 +113,8 @@ internal static class ConformanceAssert
                         Json(expectedValue, new JsonArray(outcome.Failures.Select(f => (JsonNode)f.DeepClone()).ToArray()), $"{name}: {key} results");
                         break;
                     case "validationResult":
-                        var actual = outcome.Failures.FirstOrDefault() ?? new JsonObject { ["valid"] = true };
-                        foreach (var (k, v) in expectedValue!.AsObject())
+                        JsonObject actual = outcome.Failures.FirstOrDefault() ?? new JsonObject { ["valid"] = true };
+                        foreach ((string k, JsonNode? v) in expectedValue!.AsObject())
                         {
                             Json(v, actual[k], $"{name}: {key} result.{k}");
                         }
@@ -136,5 +136,5 @@ internal static class ConformanceAssert
     };
 
     private static string? Str(JsonNode? node) =>
-        node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+        node is JsonValue v && v.TryGetValue<string>(out string? s) ? s : null;
 }
