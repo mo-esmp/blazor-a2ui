@@ -4,15 +4,14 @@ A Blazor renderer for [A2UI](https://a2ui.org) **v1.0**, the Agent-to-UI protoco
 streams JSON messages that describe a UI, and the renderer draws it with native components,
 keeps a data model, and sends the user's actions back.
 
-> **Status: preview.** The protocol core (`BlazorA2UI.Core`) is merged and passes Google's
-> conformance suites. The Razor components and the agent-side helpers are being built next, so
-> the sections below marked *planned* describe the API they will have. Names may still change
-> before the first release.
+> **Status: preview.** The protocol core (`BlazorA2UI.Core`) passes Google's conformance
+> suites, and the Razor components (`BlazorA2UI`) render the whole basic catalog. The agent-side
+> helpers come next. Names may still change before the first release.
 >
 > | Part | Package | State |
 > | --- | --- | --- |
 > | Protocol core: messages, data model, bindings, functions, catalogs, validation, agent and renderer function calls | `BlazorA2UI.Core` | Done |
-> | Blazor components: the basic catalog as Razor components, with the safety rules below | `BlazorA2UI` | Planned (PR 2) |
+> | Blazor components: the basic catalog as Razor components, with the safety rules below | `BlazorA2UI` | Done |
 > | Agent side: message builders, a streaming endpoint, and sample apps | `BlazorA2UI.Agent` | Planned (PR 3) |
 
 ## Why a new renderer
@@ -52,9 +51,9 @@ hosting model:
 
 | Hosting model | Supported |
 | --- | --- |
-| Blazor Server (interactive server rendering) | Yes (planned with PR 2) |
-| Blazor WebAssembly, standalone or hosted | Yes (planned with PR 2) |
-| Blazor Web App with `InteractiveAuto` | Yes (planned with PR 2) |
+| Blazor Server (interactive server rendering) | Yes |
+| Blazor WebAssembly, standalone or hosted | Yes |
+| Blazor Web App with `InteractiveAuto` | Yes |
 | Static server-side rendering (no interactivity) | Display only: surfaces render, but inputs and actions need an interactive render mode |
 | .NET MAUI Blazor Hybrid | Expected to work, not tested yet |
 
@@ -65,11 +64,11 @@ that validates or pre-processes agent output.
 
 The basic catalog from the A2UI v1.0 specification
 (`https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json`) has 18 components. The core
-already parses and validates all of them. Their Razor versions come with PR 2.
+parses and validates all of them, and `BlazorA2UI` renders each one.
 
 | Category | Components | Notes |
 | --- | --- | --- |
-| Display | `Text`, `Icon`, `Divider` | `Text` renders plain text. Markdown, if added, will never load images or links on its own. |
+| Display | `Text`, `Icon`, `Divider` | `Text` renders plain text. Markdown, if added, will never load images or links on its own. A named `Icon` renders the class `a2ui-icon-{name}` for your icon set to style; an `svgPath` icon draws itself. |
 | Media | `Image`, `Video`, `AudioPlayer` | Rendered only through the host's media allowlist; otherwise a blocked placeholder. |
 | Layout | `Row`, `Column`, `List`, `Card`, `Tabs`, `Modal` | `justify`, `align` and the like map to CSS classes. `List` supports templates with `@index`. |
 | Input | `Button`, `TextField`, `CheckBox`, `ChoicePicker`, `Slider`, `DateTimeInput` | Two-way bound to the data model, with `@checks` validation messages. |
@@ -80,10 +79,11 @@ The catalog's 14 functions are implemented in the core: `required`, `regex`, `le
 `callAgentFunction`.
 
 Custom catalogs and components are supported by the core: register a `Catalog` with your own
-component and function definitions. Mapping a custom component to your own Razor component is
-planned for PR 2.
+component and function definitions. Map a custom component to your own Razor component, which
+inherits `A2UIComponentBase`, with `options.Components.Register<MyChart>("Chart", catalogId)`.
+`options.Components.Unregister("Video")` turns a component off; it then renders a placeholder.
 
-## Getting started in a Blazor app (planned, PR 2)
+## Getting started in a Blazor app
 
 **1. Add the package:**
 
@@ -117,6 +117,12 @@ WebAssembly):
 @using BlazorA2UI.Components
 
 <A2UISurface SurfaceId="my-surface" OnAction="HandleAction" />
+
+@code {
+    // Called after a component's action ran; the event itself already went to the agent.
+    private void HandleAction(A2UIActionEventArgs e) =>
+        Console.WriteLine($"{e.ComponentId} on {e.SurfaceId} was used.");
+}
 ```
 
 **5. Stream the agent's messages** into the scoped processor:
@@ -146,7 +152,8 @@ the agent endpoint must allow your app's origin (CORS).
 | --- | --- | --- |
 | `src/BlazorA2UI.Core` | `BlazorA2UI.Core` | The protocol engine. No UI dependency. |
 | `tests/BlazorA2UI.Core.Tests` | | Unit and conformance tests. |
-| `src/BlazorA2UI` | `BlazorA2UI` | Razor components. Planned (PR 2). |
+| `src/BlazorA2UI` | `BlazorA2UI` | Razor components, the media allowlist and `a2ui.css`. |
+| `tests/BlazorA2UI.Tests` | | bUnit tests for the components and the rendering safety rules. |
 | `src/BlazorA2UI.Agent` | `BlazorA2UI.Agent` | Agent-side builders and endpoint. Planned (PR 3). |
 | `samples/` | | Blazor Server and WebAssembly sample apps and a sample agent. Planned (PR 3). |
 
