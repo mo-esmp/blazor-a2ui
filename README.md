@@ -14,15 +14,6 @@ keeps a data model, and sends the user's actions back.
 > | Blazor components: the basic catalog as Razor components, with the safety rules below | `BlazorA2UI` | Done |
 > | Agent side: message builders, a streaming endpoint, and sample apps | `BlazorA2UI.Agent` | Planned (PR 3) |
 
-## Why a new renderer
-
-[23min/a2ui-blazor](https://github.com/23min/a2ui-blazor) was the first Blazor renderer for A2UI,
-but it targets v0.8/v0.9 and has not moved since early 2026. v1.0 changed the wire format in ways
-that are not a rename: `@path` / `@call` / `@index` keys, envelope keys such as `@catalogId` and
-`@checks`, the surface theme removed, functions callable in both directions
-(`callAgentFunction`, `callRendererFunction`), and per-component catalogs. This project implements
-v1.0 from the specification and checks itself against Google's shared conformance suite.
-
 ## Safety rules
 
 A model writes the UI, so everything in a message is treated as untrusted input:
