@@ -59,4 +59,23 @@ public sealed class DataModelTests
         // Assert
         model.Snapshot().ShouldNotBeNull().ToJsonString().ShouldBe("""{"items":[null,{"name":"b"}]}""");
     }
+
+    /// <summary>
+    /// Proves that deleting a list item notifies observers of later indices, whose values shift down.
+    /// </summary>
+    [Fact]
+    public void Delete_EarlierListItem_NotifiesShiftedIndexObservers()
+    {
+        // Arrange
+        DataModel model = new(JsonNode.Parse("""["a","b","c"]"""));
+        int calls = 0;
+        using IDisposable observer = model.Observe("/1", () => calls++);
+
+        // Act
+        model.Delete("/0");
+
+        // Assert
+        model.Get("/1").ShouldNotBeNull().GetValue<string>().ShouldBe("c");
+        calls.ShouldBe(1);
+    }
 }

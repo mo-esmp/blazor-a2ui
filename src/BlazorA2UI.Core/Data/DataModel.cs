@@ -152,10 +152,15 @@ public sealed class DataModel
                 obj.Remove(last);
                 break;
             case JsonArray arr when TryParseIndex(last, out int index) && index < arr.Count:
-                // Detach the old node first so it can still be inspected for observers.
-                arr[index] = null;
-                arr.RemoveAt(index);
-                break;
+                {
+                    // Removing an item shifts every later item down, so the change is reported for the
+                    // whole list: observers of later indices see their new values.
+                    JsonArray before = (JsonArray)arr.DeepClone();
+                    arr.RemoveAt(index);
+                    List<string> listPath = segments.Take(segments.Count - 1).ToList();
+                    AfterWrite(listPath, true, before, true, arr);
+                    return;
+                }
             default:
                 return;
         }

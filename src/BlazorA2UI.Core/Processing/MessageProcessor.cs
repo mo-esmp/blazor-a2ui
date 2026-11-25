@@ -20,6 +20,11 @@ namespace BlazorA2UI.Processing;
 public sealed class MessageProcessor
 {
     /// <summary>
+    /// The protocol keys whose string values are data paths.
+    /// </summary>
+    private static readonly string[] s_pathKeys = ["path", "@path"];
+
+    /// <summary>
     /// The message kinds of protocol v1.0; an envelope must hold exactly one of them.
     /// </summary>
     private static readonly string[] s_messageKinds =
@@ -152,6 +157,11 @@ public sealed class MessageProcessor
     }
 
     /// <summary>
+    /// Parser options for stream lines: a repeated property name is a parse error, not a later exception.
+    /// </summary>
+    private static readonly JsonDocumentOptions s_lineOptions = new() { AllowDuplicateProperties = false };
+
+    /// <summary>
     /// Processes one line of a JSONL stream. Blank lines are ignored.
     /// </summary>
     public void ProcessLine(string line)
@@ -164,7 +174,7 @@ public sealed class MessageProcessor
         JsonNode? node;
         try
         {
-            node = JsonNode.Parse(line);
+            node = JsonNode.Parse(line, documentOptions: s_lineOptions);
         }
         catch (JsonException ex)
         {
@@ -229,17 +239,49 @@ public sealed class MessageProcessor
                 }
 
                 return;
-            case JsonObject wrapper when wrapper.Count == 1 && wrapper["messages"] is JsonArray messages:
+            case JsonObject wrapper when PropertyCount(wrapper) == 1 && wrapper["messages"] is JsonArray messages:
                 ProcessCore(messages);
                 return;
             case JsonObject envelope:
-                CheckDepthAndPaths(envelope, 0);
+                try
+                {
+                    CheckDepthAndPaths(envelope, 0);
+                }
+                catch (ArgumentException ex)
+                {
+                    throw DuplicateProperty(ex);
+                }
+
                 ProcessEnvelope(envelope);
                 return;
             default:
                 throw new A2UIValidationException("A message must be a JSON object.");
         }
     }
+
+    /// <summary>
+    /// Counts an object's properties. A node parsed with duplicate properties allowed builds its
+    /// property table on first access, and a repeated name throws there.
+    /// </summary>
+    /// <exception cref="A2UIValidationException">The object repeats a property name.</exception>
+    private static int PropertyCount(JsonObject obj)
+    {
+        try
+        {
+            return obj.Count;
+        }
+        catch (ArgumentException ex)
+        {
+            throw DuplicateProperty(ex);
+        }
+    }
+
+    /// <summary>
+    /// The validation error for a message that repeats a property name in one object.
+    /// <see cref="CheckDepthAndPaths"/> touches every object of an envelope first, so this is where such a message stops.
+    /// </summary>
+    private static A2UIValidationException DuplicateProperty(ArgumentException ex) =>
+        new($"The message repeats a property name in one object: {ex.Message}");
 
     /// <summary>
     /// Largest JSON nesting accepted in one message.
@@ -249,8 +291,13 @@ public sealed class MessageProcessor
     /// <summary>
     /// Rejects messages nested deeper than <see cref="MaxMessageDepth"/> and data paths
     /// (<c>@path</c> and <c>path</c> strings) that are not JSON Pointers or relative paths.
+    /// Data-model values (<c>updateDataModel.value</c>, <c>createSurface.dataModel</c>) are only
+    /// checked for depth, since their keys are application data.
     /// </summary>
-    private static void CheckDepthAndPaths(JsonNode? node, int depth)
+    /// <param name="node">The value to check.</param>
+    /// <param name="depth">Its depth below the envelope.</param>
+    /// <param name="checkPaths">Whether <c>path</c> and <c>@path</c> keys here are protocol fields.</param>
+    private static void CheckDepthAndPaths(JsonNode? node, int depth, bool checkPaths = true)
     {
         if (depth > MaxMessageDepth)
         {
@@ -262,12 +309,12 @@ public sealed class MessageProcessor
             case JsonArray array:
                 foreach (JsonNode? item in array)
                 {
-                    CheckDepthAndPaths(item, depth + 1);
+                    CheckDepthAndPaths(item, depth + 1, checkPaths);
                 }
 
                 break;
             case JsonObject obj:
-                foreach (string key in new[] { "path", "@path" })
+                foreach (string key in checkPaths ? s_pathKeys : [])
                 {
                     if (obj[key] is JsonValue v && v.TryGetValue<string>(out string? path) && !IsValidPathSyntax(path))
                     {
@@ -275,9 +322,11 @@ public sealed class MessageProcessor
                     }
                 }
 
-                foreach ((string _, JsonNode? value) in obj)
+                foreach ((string key, JsonNode? value) in obj)
                 {
-                    CheckDepthAndPaths(value, depth + 1);
+                    // Data-model values are application data: a "path" key in them is ordinary text.
+                    bool isData = depth == 1 && key is "value" or "dataModel";
+                    CheckDepthAndPaths(value, depth + 1, checkPaths && !isData);
                 }
 
                 break;
@@ -921,6 +970,7 @@ public sealed class MessageProcessor
 
         surface.IsDeleted = true;
         surface.AgentCalls.CancelAll("The surface was deleted.");
+        surface.LocalCalls.Clear();
         surface.DataModel.DisposeObservers();
         SurfaceDeleted?.Invoke(surface);
     }
@@ -936,6 +986,17 @@ public sealed class MessageProcessor
         if (body.ContainsKey("value") == body.ContainsKey("error"))
         {
             throw new A2UIValidationException("agentFunctionResponse must have exactly one of 'value' or 'error'.") { FunctionCallId = id };
+        }
+
+        if (body.ContainsKey("error")
+            && (body["error"] is not JsonObject error || A2UIValues.AsString(error["code"]) is null || A2UIValues.AsString(error["message"]) is null))
+        {
+            // Checked before the call is looked up, so a malformed error never settles a call as a success.
+            throw new A2UIValidationException("agentFunctionResponse 'error' must be an object with string 'code' and 'message'.")
+            {
+                FunctionCallId = id,
+                Path = "/error",
+            };
         }
 
         foreach (Surface surface in _surfaces.Values)

@@ -114,6 +114,11 @@ public sealed class Surface
     internal AgentCallManager AgentCalls { get; }
 
     /// <summary>
+    /// Gets the asynchronous local calls that the surface's bindings and checks started, kept until their inputs change.
+    /// </summary>
+    internal LocalCallCache LocalCalls { get; } = new();
+
+    /// <summary>
     /// Routes calls without a local implementation to the agent.
     /// </summary>
     public IAgentFunctionRouter AgentRouter => AgentCalls;
@@ -435,9 +440,9 @@ public sealed class Surface
     }
 
     /// <summary>
-    /// Returns a copy of the data model's root object, or an empty object.
+    /// Returns a copy of the data model's root, whatever its kind, or an empty object when nothing was written.
     /// </summary>
-    internal JsonObject DataModelSnapshot() => DataModel.Root?.DeepClone() as JsonObject ?? new JsonObject();
+    internal JsonNode DataModelSnapshot() => DataModel.Root?.DeepClone() ?? new JsonObject();
 }
 
 /// <summary>

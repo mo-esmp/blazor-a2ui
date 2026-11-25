@@ -101,7 +101,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
     public async Task<JsonNode?> CallAsync(string catalogId, string name, JsonObject args, CancellationToken cancellationToken)
     {
         PendingCall call = Send(catalogId, name, args);
-        using CancellationTokenRegistration registration = cancellationToken.Register(() => call.Cancel("The action was cancelled."));
+        using CancellationTokenRegistration registration = cancellationToken.Register(() => Cancel(call, "The action was cancelled."));
         try
         {
             return await call.Task.ConfigureAwait(false);
@@ -237,6 +237,20 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
         };
         processor.SendOutbound(message);
         return call;
+    }
+
+    /// <summary>
+    /// Cancels one call and frees its pending slot, so a cancelled call no longer counts against
+    /// <see cref="A2UIProcessorOptions.MaxPendingAgentCalls"/>. A late answer for it is ignored.
+    /// </summary>
+    private void Cancel(PendingCall call, string reason)
+    {
+        lock (_gate)
+        {
+            _pending.Remove(call.FunctionCallId);
+        }
+
+        call.Cancel(reason);
     }
 
     /// <summary>

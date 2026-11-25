@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using BlazorA2UI.Catalogs;
 using BlazorA2UI.Expressions;
+using BlazorA2UI.Rpc;
 
 namespace BlazorA2UI.Evaluation;
 
@@ -258,7 +259,7 @@ public sealed class A2UIEvaluator
                 }
             }
 
-            return await InvokeAsync(implementation, invocation).ConfigureAwait(false);
+            return await RunLocalAsync(implementation, invocation, catalog.CatalogId, name, args, context, scope).ConfigureAwait(false);
         }
 
         if (scope.Mode == EvaluationMode.AgentCall)
@@ -435,6 +436,46 @@ public sealed class A2UIEvaluator
 
                 break;
         }
+    }
+
+    /// <summary>
+    /// Runs a local function for a call. In a binding or check on a surface, a call that does not complete
+    /// synchronously is kept in the surface's <see cref="LocalCallCache"/>, so the evaluation that follows its
+    /// settling reads the stored value or error instead of starting the call again. New arguments select a new entry.
+    /// </summary>
+    /// <returns>The function's result.</returns>
+    /// <exception cref="A2UIException">The function failed, now or in the stored call.</exception>
+    private static async ValueTask<JsonNode?> RunLocalAsync(
+        A2UIFunction implementation,
+        FunctionInvocation invocation,
+        string catalogId,
+        string name,
+        JsonObject args,
+        EvaluationContext context,
+        EvaluationScope scope)
+    {
+        if (!scope.IsReactive || context.Surface is not { } surface)
+        {
+            return await InvokeAsync(implementation, invocation).ConfigureAwait(false);
+        }
+
+        string key = AgentCallManager.CacheKey(catalogId, name, args);
+        if (surface.LocalCalls.TryGet(key, out Task<JsonNode?>? stored))
+        {
+            JsonNode? settled = await stored.ConfigureAwait(false);
+            return settled?.DeepClone();
+        }
+
+        ValueTask<JsonNode?> run = InvokeAsync(implementation, invocation);
+        if (run.IsCompleted)
+        {
+            return run.GetAwaiter().GetResult();
+        }
+
+        Task<JsonNode?> task = run.AsTask();
+        surface.LocalCalls.Add(key, task);
+        JsonNode? result = await task.ConfigureAwait(false);
+        return result?.DeepClone();
     }
 
     /// <summary>
