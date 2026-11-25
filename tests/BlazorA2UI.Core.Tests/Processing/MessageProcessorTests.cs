@@ -1,6 +1,7 @@
 ﻿using System.Text.Json.Nodes;
 using BlazorA2UI.Catalogs;
 using BlazorA2UI.Processing;
+using BlazorA2UI.Rpc;
 using Shouldly;
 using Xunit;
 
@@ -242,6 +243,79 @@ public sealed class MessageProcessorTests
         // Assert
         process.ShouldNotThrow();
         errors.ShouldContain(e => e.Code == A2UIErrorCodes.ValidationFailed);
+    }
+
+    /// <summary>
+    /// Proves that a catalog for another protocol version can be registered but no surface can be created with it, and it is not advertised.
+    /// </summary>
+    [Fact]
+    public void ProcessOrThrow_CreateSurfaceWithOtherVersionCatalog_ThrowsCatalogNotFound()
+    {
+        // Arrange
+        Catalog old = new("test:v09", [], [], protocolVersion: "0.9");
+        MessageProcessor processor = new([BasicCatalog.Create(), old]);
+
+        // Act
+        Action create = () => processor.ProcessOrThrow(Message("""{"surfaceId":"s","catalogId":"test:v09"}"""));
+
+        // Assert
+        create.ShouldThrow<A2UICatalogException>().Message.ShouldContain("Catalog not found: test:v09");
+        processor.Surfaces.ShouldBeEmpty();
+        processor.GetRendererCapabilities().ToJsonString().ShouldNotContain("test:v09");
+    }
+
+    /// <summary>
+    /// Proves that cancelling the token of a host agent call fails it with CANCELLED and frees its id for a new call.
+    /// </summary>
+    [Fact]
+    public async Task CallAgentFunctionAsync_TokenCancelled_FailsWithCancelledAndFreesIdAsync()
+    {
+        // Arrange
+        MessageProcessor processor = new([BasicCatalog.Create()], new A2UIProcessorOptions { AgentCallTimeout = Timeout.InfiniteTimeSpan });
+        processor.Outbound = _ => ValueTask.CompletedTask;
+        processor.ProcessOrThrow(Message($$$"""{"surfaceId":"s","catalogId":"{{{s_basicId}}}"}"""));
+        using CancellationTokenSource cancel = new();
+        A2UIAgentCallOptions options = new() { FunctionCallId = "fc-1" };
+        Task<JsonNode?> call = processor.CallAgentFunctionAsync("s", s_basicId, "lookup", null, options, cancel.Token);
+
+        // Act
+        await cancel.CancelAsync();
+        A2UIException error = await Should.ThrowAsync<A2UIException>(() => call);
+
+        // Assert
+        error.Code.ShouldBe(A2UIErrorCodes.Cancelled);
+        processor.IsAgentCallPending("fc-1").ShouldBeFalse();
+        Task<JsonNode?> again = processor.CallAgentFunctionAsync("s", s_basicId, "lookup", null, options);
+        again.IsFaulted.ShouldBeFalse();
+        processor.Dispose();
+        (await Should.ThrowAsync<A2UIException>(() => again)).Code.ShouldBe(A2UIErrorCodes.Cancelled);
+    }
+
+    /// <summary>
+    /// Proves that disposing a processor twice is safe and that later host agent calls fail with DISPOSED without sending anything.
+    /// </summary>
+    [Fact]
+    public async Task CallAgentFunctionAsync_AfterDispose_FailsWithDisposedAsync()
+    {
+        // Arrange
+        MessageProcessor processor = new([BasicCatalog.Create()]);
+        int sent = 0;
+        processor.Outbound = _ =>
+        {
+            sent++;
+            return ValueTask.CompletedTask;
+        };
+        processor.ProcessOrThrow(Message($$$"""{"surfaceId":"s","catalogId":"{{{s_basicId}}}"}"""));
+        processor.Dispose();
+
+        // Act
+        processor.Dispose();
+        A2UIException error = await Should.ThrowAsync<A2UIException>(() => processor.CallAgentFunctionAsync("s", s_basicId, "lookup"));
+
+        // Assert
+        error.Code.ShouldBe(A2UIErrorCodes.Disposed);
+        sent.ShouldBe(0);
+        processor.IsDisposed.ShouldBeTrue();
     }
 
     /// <summary>

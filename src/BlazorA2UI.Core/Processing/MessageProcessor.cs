@@ -7,6 +7,7 @@ using BlazorA2UI.Catalogs;
 using BlazorA2UI.Data;
 using BlazorA2UI.Evaluation;
 using BlazorA2UI.Model;
+using BlazorA2UI.Rpc;
 using BlazorA2UI.Text;
 
 namespace BlazorA2UI.Processing;
@@ -17,7 +18,7 @@ namespace BlazorA2UI.Processing;
 /// it maintains surfaces, answers <c>callRendererFunction</c>, and emits renderer-to-agent
 /// messages through <see cref="Outbound"/>.
 /// </summary>
-public sealed class MessageProcessor
+public sealed class MessageProcessor : IDisposable
 {
     /// <summary>
     /// The protocol keys whose string values are data paths.
@@ -48,40 +49,41 @@ public sealed class MessageProcessor
     private A2UIValidationConfig? _activeValidation;
 
     /// <summary>
+    /// Set by <see cref="Dispose"/>; read without a lock because it only ever changes from false to true.
+    /// </summary>
+    private volatile bool _disposed;
+
+    /// <summary>
+    /// Whether the batch being processed runs inside a user gesture (see <see cref="A2UIExecutionContext.IsUserActivated"/>).
+    /// </summary>
+    private bool _activeUserActivation;
+
+    /// <summary>
     /// Creates a processor.
     /// </summary>
     /// <param name="catalogs">The catalogs the renderer supports.</param>
     /// <param name="options">Limits and behavior; null uses the defaults.</param>
-    /// <exception cref="A2UICatalogException">Two catalogs share an id, or a catalog targets another protocol version.</exception>
+    /// <remarks>
+    /// Catalogs for another protocol version may be registered, but surfaces never see them, and an agent
+    /// call that names one is refused with <see cref="A2UIErrorCodes.InvalidFunctionCall"/>.
+    /// </remarks>
+    /// <exception cref="A2UICatalogException">Two catalogs share an id.</exception>
     public MessageProcessor(IEnumerable<Catalog> catalogs, A2UIProcessorOptions? options = null)
     {
         Options = options ?? new A2UIProcessorOptions();
         Catalogs = new CatalogRegistry(catalogs);
-        foreach (Catalog catalog in Catalogs.Catalogs)
-        {
-            if (catalog.ProtocolVersion != A2UIProtocol.Version)
-            {
-                throw new A2UICatalogException(
-                    $"Catalog '{catalog.CatalogId}' targets protocol {catalog.ProtocolVersion}; this renderer implements {A2UIProtocol.Version}.");
-            }
-        }
-
         Evaluator = new A2UIEvaluator(Catalogs, Options.Services);
         _activeValidation = Options.Validation;
     }
 
     /// <summary>
-    /// Registers another catalog. Its id must not already be registered.
+    /// Registers another catalog. Its id must not already be registered. Surfaces created afterwards can use it;
+    /// existing surfaces keep the catalogs they were created with.
     /// </summary>
+    /// <exception cref="A2UICatalogException">A catalog with the same id is already registered; nothing changes.</exception>
     public void AddCatalog(Catalog catalog)
     {
         ArgumentNullException.ThrowIfNull(catalog);
-        if (catalog.ProtocolVersion != A2UIProtocol.Version)
-        {
-            throw new A2UICatalogException(
-                $"Catalog '{catalog.CatalogId}' targets protocol {catalog.ProtocolVersion}; this renderer implements {A2UIProtocol.Version}.");
-        }
-
         Catalogs.Add(catalog);
     }
 
@@ -138,7 +140,10 @@ public sealed class MessageProcessor
     {
         [A2UIProtocol.Version] = new JsonObject
         {
-            ["supportedCatalogIds"] = new JsonArray(Catalogs.Catalogs.Select(c => (JsonNode)c.CatalogId).ToArray()),
+            ["supportedCatalogIds"] = new JsonArray(Catalogs.Catalogs
+                .Where(c => c.ProtocolVersion == A2UIProtocol.Version)
+                .Select(c => (JsonNode)c.CatalogId)
+                .ToArray()),
         },
     };
 
@@ -202,9 +207,48 @@ public sealed class MessageProcessor
     }
 
     /// <summary>
+    /// Processes a message with settings for this call only. Errors are reported, never thrown.
+    /// </summary>
+    /// <param name="message">A message, a JSON array of messages, or a <c>{"messages": [...]}</c> wrapper.</param>
+    /// <param name="context">The settings for this call.</param>
+    public void Process(JsonNode? message, A2UIExecutionContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        try
+        {
+            ProcessOrThrow(message, context);
+        }
+        catch (A2UIException ex)
+        {
+            ReportError(ex, ex.SurfaceId);
+        }
+    }
+
+    /// <summary>
     /// Like <see cref="Process(JsonNode)"/>, but throws the first envelope-level error.
     /// </summary>
-    public void ProcessOrThrow(JsonNode? message) => ProcessOrThrow(message, null);
+    public void ProcessOrThrow(JsonNode? message) => ProcessOrThrow(message, (A2UIValidationConfig?)null);
+
+    /// <summary>
+    /// Like <see cref="ProcessOrThrow(JsonNode)"/>, with settings for this call only.
+    /// </summary>
+    /// <param name="message">A message, a JSON array of messages, or a <c>{"messages": [...]}</c> wrapper.</param>
+    /// <param name="context">The settings for this call.</param>
+    /// <exception cref="A2UIException">The message is invalid; messages before it in a batch stay applied.</exception>
+    public void ProcessOrThrow(JsonNode? message, A2UIExecutionContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        bool previous = _activeUserActivation;
+        _activeUserActivation = context.IsUserActivated;
+        try
+        {
+            ProcessOrThrow(message, context.Validation);
+        }
+        finally
+        {
+            _activeUserActivation = previous;
+        }
+    }
 
     /// <summary>
     /// Like <see cref="ProcessOrThrow(JsonNode)"/>, with completeness rules for this call only
@@ -350,6 +394,92 @@ public sealed class MessageProcessor
     }
 
     /// <summary>
+    /// Gets whether <see cref="Dispose"/> has run. A disposed processor sends no new agent calls.
+    /// </summary>
+    public bool IsDisposed => _disposed;
+
+    /// <summary>
+    /// Calls an agent function on behalf of the host (<c>callAgentFunction</c>) and waits for the agent's answer.
+    /// </summary>
+    /// <param name="surfaceId">The surface the call belongs to.</param>
+    /// <param name="catalogId">The catalog that declares the function.</param>
+    /// <param name="name">The function name.</param>
+    /// <param name="args">The arguments to send, or null for none. They are copied.</param>
+    /// <param name="options">The call id and timeout, or null for the defaults.</param>
+    /// <param name="cancellationToken">Cancels the call; it then fails with <see cref="A2UIErrorCodes.Cancelled"/> and a late answer is ignored.</param>
+    /// <returns>The value the agent answered with. A2UI errors fail the returned task rather than being thrown.</returns>
+    /// <exception cref="ArgumentException">An id or the name is empty; a caller bug, thrown at once.</exception>
+    /// <exception cref="A2UIException">
+    /// No surface has the id (<see cref="A2UIErrorCodes.IntegrityError"/>); the call could not be sent
+    /// (<see cref="A2UIErrorCodes.Disposed"/>, <see cref="A2UIErrorCodes.NoListener"/>, <see cref="A2UIErrorCodes.Duplicate"/>);
+    /// it timed out (<see cref="A2UIErrorCodes.Timeout"/>) or was cancelled (<see cref="A2UIErrorCodes.Cancelled"/>);
+    /// or the agent answered with an error, whose code it keeps.
+    /// </exception>
+    public Task<JsonNode?> CallAgentFunctionAsync(
+        string surfaceId,
+        string catalogId,
+        string name,
+        JsonObject? args = null,
+        A2UIAgentCallOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(surfaceId);
+        ArgumentException.ThrowIfNullOrEmpty(catalogId);
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        if (options?.FunctionCallId is { Length: 0 })
+        {
+            throw new ArgumentException("The function call id must not be empty.", nameof(options));
+        }
+
+        if (_disposed)
+        {
+            return Task.FromException<JsonNode?>(new A2UIException(A2UIErrorCodes.Disposed, "The message processor was disposed."));
+        }
+
+        if (!_surfaces.TryGetValue(surfaceId, out Surface? surface))
+        {
+            return Task.FromException<JsonNode?>(
+                new A2UIException(A2UIErrorCodes.IntegrityError, $"Surface '{surfaceId}' does not exist.") { SurfaceId = surfaceId });
+        }
+
+        return surface.AgentCalls.CallForHostAsync(catalogId, name, (JsonObject?)args?.DeepClone() ?? new JsonObject(), options, cancellationToken);
+    }
+
+    /// <summary>
+    /// Cancels every agent call waiting for an answer and refuses new ones with <see cref="A2UIErrorCodes.Disposed"/>.
+    /// Surfaces and their data stay readable. Calling it again does nothing.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        foreach (Surface surface in _surfaces.Values)
+        {
+            surface.AgentCalls.CancelAll("The message processor was disposed.");
+        }
+    }
+
+    /// <summary>
+    /// Whether any surface has an agent call with this id waiting for an answer.
+    /// </summary>
+    internal bool IsAgentCallPending(string functionCallId)
+    {
+        foreach (Surface surface in _surfaces.Values)
+        {
+            if (surface.AgentCalls.Owns(functionCallId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Completes when every in-flight <c>callRendererFunction</c> has been answered.
     /// </summary>
     public Task WhenIdleAsync()
@@ -419,7 +549,7 @@ public sealed class MessageProcessor
                 break;
             case "callRendererFunction":
                 ValidateCallRendererFunction(body);
-                Track(HandleCallRendererFunctionAsync(body));
+                Track(HandleCallRendererFunctionAsync(body, _activeUserActivation));
                 break;
             case "agentFunctionResponse":
                 HandleAgentFunctionResponse(body);
@@ -481,7 +611,7 @@ public sealed class MessageProcessor
             catalogId = A2UIValues.AsString(body["catalogId"]) is { Length: > 0 } id
                 ? id
                 : throw new A2UIValidationException("catalogId must be a non-empty string.") { SurfaceId = surfaceId };
-            if (!Catalogs.TryGet(catalogId, out _))
+            if (!Catalogs.TryGet(catalogId, out Catalog? named) || named.ProtocolVersion != A2UIProtocol.Version)
             {
                 throw new A2UICatalogException($"Catalog not found: {catalogId}") { SurfaceId = surfaceId };
             }
@@ -1046,7 +1176,9 @@ public sealed class MessageProcessor
     /// <summary>
     /// Handles <c>callRendererFunction</c>: runs a renderer function for the agent and sends back the value or the error.
     /// </summary>
-    private async Task HandleCallRendererFunctionAsync(JsonObject body)
+    /// <param name="body">The <c>callRendererFunction</c> body.</param>
+    /// <param name="userActivated">Whether the message was processed inside a user gesture.</param>
+    private async Task HandleCallRendererFunctionAsync(JsonObject body, bool userActivated)
     {
         string? functionCallId = A2UIValues.AsString(body["functionCallId"]);
         if (functionCallId is null)
@@ -1080,7 +1212,7 @@ public sealed class MessageProcessor
                 context = EvaluationContext.Detached();
             }
 
-            JsonNode? value = await Evaluator.EvaluateAsync(call, context, new EvaluationScope(EvaluationMode.AgentCall)).ConfigureAwait(false);
+            JsonNode? value = await Evaluator.EvaluateAsync(call, context, new EvaluationScope(EvaluationMode.AgentCall) { UserActivationOverride = userActivated }).ConfigureAwait(false);
             await SendOutboundAsync(new JsonObject
             {
                 ["version"] = A2UIProtocol.Version,
@@ -1103,86 +1235,138 @@ public sealed class MessageProcessor
     }
 
     /// <summary>
-    /// Runs an action for a component after a user gesture.
+    /// Runs an action for a component after a user gesture. Failures are reported, never thrown.
     /// </summary>
     internal async Task DispatchActionAsync(
         Surface surface,
         ComponentInstance component,
         JsonNode? action,
         EvaluationContext context,
+        JsonObject? metadata,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await DispatchActionCoreAsync(surface, component.Id, action, context, metadata, userActivated: true, cancellationToken).ConfigureAwait(false);
+        }
+        catch (A2UIException ex)
+        {
+            ReportActionError(surface, ex);
+        }
+    }
+
+    /// <summary>
+    /// Runs an action: sends its <c>event</c> to the agent, or runs its local <c>functionCall</c>.
+    /// </summary>
+    /// <param name="surface">The surface the action belongs to.</param>
+    /// <param name="sourceComponentId">The component the user acted on.</param>
+    /// <param name="action">The component's <c>action</c> property.</param>
+    /// <param name="context">The data scope the action resolves against.</param>
+    /// <param name="metadata">The host's <c>metadata</c> for the dispatched event, or null.</param>
+    /// <param name="userActivated">Whether a user gesture started the action.</param>
+    /// <param name="cancellationToken">Cancels agent calls the action makes.</param>
+    /// <returns>The result of a <c>functionCall</c> action; null for an event or a missing action.</returns>
+    /// <exception cref="A2UIException">
+    /// The action is malformed (<see cref="A2UIErrorCodes.InvalidAction"/>), its metadata is invalid, or a call in it failed.
+    /// Nothing is sent to the agent after a failure.
+    /// </exception>
+    internal async Task<JsonNode?> DispatchActionCoreAsync(
+        Surface surface,
+        string sourceComponentId,
+        JsonNode? action,
+        EvaluationContext context,
+        JsonObject? metadata,
+        bool userActivated,
         CancellationToken cancellationToken)
     {
         if (action is not JsonObject actionObject)
         {
+            return null;
+        }
+
+        EvaluationScope scope = new(EvaluationMode.Action) { CancellationToken = cancellationToken, UserActivationOverride = userActivated };
+        if (actionObject["functionCall"] is JsonObject functionCall)
+        {
+            return await Evaluator.EvaluateAsync(functionCall, context, scope).ConfigureAwait(false);
+        }
+
+        if (actionObject["event"] is not JsonObject ev)
+        {
+            throw new A2UIException(A2UIErrorCodes.InvalidAction, "An action needs an 'event' or a 'functionCall'.");
+        }
+
+        if (A2UIValues.AsString(ev["name"]) is not { Length: > 0 } name)
+        {
+            throw new A2UIException(A2UIErrorCodes.InvalidAction, "An action event needs a non-empty string 'name'.");
+        }
+
+        JsonObject? checkedMetadata = ReadMetadata(metadata, surface.SurfaceId, "Action metadata");
+        JsonObject eventContext = new();
+        if (ev["context"] is JsonObject rawContext)
+        {
+            // Entries resolve in order; the first failure stops the action.
+            foreach ((string key, JsonNode? raw) in rawContext)
+            {
+                try
+                {
+                    eventContext[A2UIEvaluator.UnescapeKey(key)] = await Evaluator.EvaluateAsync(raw, context, scope).ConfigureAwait(false);
+                }
+                catch (A2UIException ex) when (ex.Code != A2UIErrorCodes.Cancelled)
+                {
+                    throw new A2UIExpressionException($"Action event context entry '{key}' is invalid: {ex.Message}") { FunctionCallId = ex.FunctionCallId };
+                }
+            }
+        }
+        else if (ev["context"] is not null)
+        {
+            throw new A2UIException(A2UIErrorCodes.InvalidAction, "An action event's context must be an object.");
+        }
+
+        string? userMessage = null;
+        if (ev["userMessage"] is { } rawMessage)
+        {
+            JsonNode? resolved = await Evaluator.EvaluateAsync(rawMessage, context, scope).ConfigureAwait(false);
+            if (resolved is not null && !(resolved is JsonValue sv && sv.GetValueKind() == JsonValueKind.String))
+            {
+                throw new A2UIException(A2UIErrorCodes.InvalidAction, "An action event's userMessage must resolve to a string.");
+            }
+
+            userMessage = A2UIValues.AsString(resolved);
+        }
+
+        JsonObject body = new()
+        {
+            ["name"] = name,
+            ["surfaceId"] = surface.SurfaceId,
+            ["sourceComponentId"] = sourceComponentId,
+            ["timestamp"] = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+            ["context"] = eventContext,
+        };
+        if (userMessage is not null)
+        {
+            body["userMessage"] = userMessage;
+        }
+
+        if (checkedMetadata is not null)
+        {
+            body["metadata"] = checkedMetadata;
+        }
+
+        await SendOutboundAsync(new JsonObject { ["version"] = A2UIProtocol.Version, ["action"] = body }).ConfigureAwait(false);
+        return null;
+    }
+
+    /// <summary>
+    /// Reports a failed action on its surface. Cancellation is not reported, and the error keeps its code and function call id.
+    /// </summary>
+    internal void ReportActionError(Surface surface, A2UIException error)
+    {
+        if (error.Code == A2UIErrorCodes.Cancelled)
+        {
             return;
         }
 
-        EvaluationScope scope = new(EvaluationMode.Action) { CancellationToken = cancellationToken };
-        try
-        {
-            if (actionObject["functionCall"] is JsonObject functionCall)
-            {
-                await Evaluator.EvaluateAsync(functionCall, context, scope).ConfigureAwait(false);
-                return;
-            }
-
-            if (actionObject["event"] is not JsonObject ev || A2UIValues.AsString(ev["name"]) is not { } name)
-            {
-                throw new A2UIExpressionException("An action needs an 'event' with a name, or a 'functionCall'.");
-            }
-
-            JsonObject context2 = new();
-            if (ev["context"] is JsonObject rawContext)
-            {
-                // Entries resolve in order; the first failure stops the action.
-                foreach ((string key, JsonNode? raw) in rawContext)
-                {
-                    try
-                    {
-                        context2[A2UIEvaluator.UnescapeKey(key)] = await Evaluator.EvaluateAsync(raw, context, scope).ConfigureAwait(false);
-                    }
-                    catch (A2UIException ex) when (ex.Code != A2UIErrorCodes.Cancelled)
-                    {
-                        throw new A2UIExpressionException($"Action event context entry '{key}' is invalid: {ex.Message}");
-                    }
-                }
-            }
-            else if (ev["context"] is not null)
-            {
-                throw new A2UIExpressionException("An action event's context must be an object.");
-            }
-
-            string? userMessage = null;
-            if (ev["userMessage"] is { } rawMessage)
-            {
-                JsonNode? resolved = await Evaluator.EvaluateAsync(rawMessage, context, scope).ConfigureAwait(false);
-                if (resolved is not null && !(resolved is JsonValue sv && sv.GetValueKind() == JsonValueKind.String))
-                {
-                    throw new A2UIException(A2UIErrorCodes.InvalidAction, "An action event's userMessage must resolve to a string.");
-                }
-
-                userMessage = A2UIValues.AsString(resolved);
-            }
-
-            JsonObject body = new()
-            {
-                ["name"] = name,
-                ["surfaceId"] = surface.SurfaceId,
-                ["sourceComponentId"] = component.Id,
-                ["timestamp"] = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
-                ["context"] = context2,
-            };
-            if (userMessage is not null)
-            {
-                body["userMessage"] = userMessage;
-            }
-
-            await SendOutboundAsync(new JsonObject { ["version"] = A2UIProtocol.Version, ["action"] = body }).ConfigureAwait(false);
-        }
-        catch (A2UIException ex)
-        {
-            ReportError(new A2UIException(ex.Code, ex.Message), surface.SurfaceId);
-        }
+        ReportError(new A2UIException(error.Code, error.Message) { FunctionCallId = error.FunctionCallId, Path = error.Path }, surface.SurfaceId);
     }
 
     /// <summary>

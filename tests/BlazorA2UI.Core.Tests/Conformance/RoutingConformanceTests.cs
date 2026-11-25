@@ -248,7 +248,7 @@ public sealed class RoutingConformanceTests
             null,
             null,
             null);
-        Task task = processor.DispatchActionAsync(surface, component, action, surface.RootContext, CancellationToken.None);
+        Task task = processor.DispatchActionAsync(surface, component, action, surface.RootContext, metadata: null, CancellationToken.None);
         await Task.WhenAny(task, Task.Delay(50));
     }
 

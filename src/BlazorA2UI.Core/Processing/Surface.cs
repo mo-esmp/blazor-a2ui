@@ -43,7 +43,11 @@ public sealed class Surface
         CatalogId = catalogId;
         SendDataModel = sendDataModel;
         Metadata = metadata;
-        CatalogIds = processor.Catalogs.Catalogs.Select(c => c.CatalogId).ToHashSet(StringComparer.Ordinal);
+        // Only catalogs for this protocol version are available to the surface.
+        CatalogIds = processor.Catalogs.Catalogs
+            .Where(c => c.ProtocolVersion == A2UIProtocol.Version)
+            .Select(c => c.CatalogId)
+            .ToHashSet(StringComparer.Ordinal);
         DataModel = new DataModel();
         DataModel.Changed += _ => NotifyChanged();
         AgentCalls = new AgentCallManager(this);
@@ -425,7 +429,14 @@ public sealed class Surface
     /// or runs a local <c>functionCall</c>. Failures are reported and stop the action.
     /// </summary>
     public Task DispatchActionAsync(ComponentInstance component, EvaluationContext context, CancellationToken cancellationToken = default) =>
-        Processor.DispatchActionAsync(this, component, component.Properties["action"], context, cancellationToken);
+        Processor.DispatchActionAsync(this, component, component.Properties["action"], context, metadata: null, cancellationToken);
+
+    /// <summary>
+    /// Runs a component's <c>action</c> after a user gesture, attaching the host's <paramref name="metadata"/>
+    /// (<c>{"extensions": {...}}</c>) to a dispatched event. Failures, including invalid metadata, are reported and stop the action.
+    /// </summary>
+    public Task DispatchActionAsync(ComponentInstance component, EvaluationContext context, JsonObject? metadata, CancellationToken cancellationToken = default) =>
+        Processor.DispatchActionAsync(this, component, component.Properties["action"], context, metadata, cancellationToken);
 
     /// <summary>
     /// Reports an error unless the same code and message were already reported for this surface. At most 256 distinct errors are reported.

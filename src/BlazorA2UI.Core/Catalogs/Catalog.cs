@@ -40,7 +40,7 @@ public sealed class Catalog
     /// <param name="protocolVersion">The A2UI protocol version the catalog targets.</param>
     /// <param name="instructions">Optional instructions for the agent on how to use the catalog.</param>
     /// <param name="document">The catalog document the catalog was read from, if any; used to resolve local <c>$defs</c> references.</param>
-    /// <exception cref="A2UICatalogException">The id is empty, an entity name is not a UAX #31 identifier, a component is named <c>Surface</c>, or a function that needs user activation may be called by the agent.</exception>
+    /// <exception cref="A2UICatalogException">The id is empty, an entity name is not a UAX #31 identifier, or a component is named <c>Surface</c>.</exception>
     /// <exception cref="ArgumentException">Two components or two functions share a name.</exception>
     public Catalog(
         string catalogId,
@@ -73,15 +73,6 @@ public sealed class Catalog
         if (Components.ContainsKey("Surface"))
         {
             throw new A2UICatalogException("The component name 'Surface' is reserved.");
-        }
-
-        foreach (FunctionDefinition f in Functions.Values)
-        {
-            if (f.RequiresUserActivation && f.AllowedCallers != AllowedCallers.RendererOnly)
-            {
-                throw new A2UICatalogException(
-                    $"Function '{f.Name}' requires user activation, so allowedCallers must be rendererOnly.");
-            }
         }
     }
 
