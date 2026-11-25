@@ -128,6 +128,25 @@ public sealed class AgentCallManagerTests
     }
 
     /// <summary>
+    /// Proves that the longest supported timeout, <see cref="MessageProcessor.MaxAgentCallTimeout"/>, arms its timer and sends the call.
+    /// </summary>
+    [Fact]
+    public void CallAgentFunctionAsync_MaxTimeout_SendsCall()
+    {
+        // Arrange
+        MessageProcessor processor = Create(out ConcurrentQueue<A2UIOutboundMessage> sent, "s");
+
+        // Act
+        Task<JsonNode?> call = processor.CallAgentFunctionAsync("s", s_basicId, "lookup", null, new A2UIAgentCallOptions { FunctionCallId = "fc", Timeout = MessageProcessor.MaxAgentCallTimeout });
+
+        // Assert
+        call.IsFaulted.ShouldBeFalse();
+        sent.ShouldHaveSingleItem().Kind.ShouldBe("callAgentFunction");
+        processor.IsAgentCallPending("fc").ShouldBeTrue();
+        processor.Dispose();
+    }
+
+    /// <summary>
     /// Proves that concurrent calls with one id, on one surface or several, reserve it exactly once: one call is
     /// sent and all the others fail with DUPLICATE.
     /// </summary>

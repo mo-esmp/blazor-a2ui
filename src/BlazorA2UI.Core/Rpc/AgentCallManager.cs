@@ -295,6 +295,12 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
             });
         }
 
+        if (call.Task.IsCompleted)
+        {
+            // Disposal (or a surface deletion) cancelled the call after it was registered: the agent is not asked.
+            return call;
+        }
+
         JsonObject message = new()
         {
             ["version"] = A2UIProtocol.Version,
