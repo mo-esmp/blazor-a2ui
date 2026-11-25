@@ -69,49 +69,49 @@ internal static class A2UIClasses
         .ToArray();
 
     /// <summary>
-    /// The class for a <c>justify</c> value, or null when the value is not in the enumeration.
+    /// The class for a <c>justify</c> value; a missing value, or one outside the enumeration, gives the catalog default.
     /// </summary>
-    internal static string? Justify(JsonNode? value) => Lookup(s_justify, value);
+    internal static string Justify(JsonNode? value) => Lookup(s_justify, value, "start");
 
     /// <summary>
-    /// The class for an <c>align</c> value, or null when the value is not in the enumeration.
+    /// The class for an <c>align</c> value; a missing value, or one outside the enumeration, gives the catalog default.
     /// </summary>
-    internal static string? Align(JsonNode? value) => Lookup(s_align, value);
+    internal static string Align(JsonNode? value) => Lookup(s_align, value, "stretch");
 
     /// <summary>
-    /// The class for a <c>List</c> <c>direction</c>, or null when the value is not in the enumeration.
+    /// The class for a <c>List</c> <c>direction</c>; a missing value, or one outside the enumeration, gives the catalog default.
     /// </summary>
-    internal static string? Direction(JsonNode? value) => Lookup(s_direction, value);
+    internal static string Direction(JsonNode? value) => Lookup(s_direction, value, "vertical");
 
     /// <summary>
-    /// The class for a <c>Text</c> <c>variant</c>, or null when the value is not in the enumeration.
+    /// The class for a <c>Text</c> <c>variant</c>; a missing value, or one outside the enumeration, gives the catalog default.
     /// </summary>
-    internal static string? TextVariant(JsonNode? value) => Lookup(s_textVariant, value);
+    internal static string TextVariant(JsonNode? value) => Lookup(s_textVariant, value, "body");
 
     /// <summary>
-    /// The class for an <c>Image</c> <c>variant</c>, or null when the value is not in the enumeration.
+    /// The class for an <c>Image</c> <c>variant</c>; a missing value, or one outside the enumeration, gives the catalog default.
     /// </summary>
-    internal static string? ImageVariant(JsonNode? value) => Lookup(s_imageVariant, value);
+    internal static string ImageVariant(JsonNode? value) => Lookup(s_imageVariant, value, "mediumFeature");
 
     /// <summary>
-    /// The class for an <c>Image</c> <c>fit</c>, or null when the value is not in the enumeration.
+    /// The class for an <c>Image</c> <c>fit</c>; a missing value, or one outside the enumeration, gives the catalog default.
     /// </summary>
-    internal static string? Fit(JsonNode? value) => Lookup(s_fit, value);
+    internal static string Fit(JsonNode? value) => Lookup(s_fit, value, "fill");
 
     /// <summary>
-    /// The class for a <c>Button</c> <c>variant</c>, or null when the value is not in the enumeration.
+    /// The class for a <c>Button</c> <c>variant</c>; a missing value, or one outside the enumeration, gives the catalog default.
     /// </summary>
-    internal static string? ButtonVariant(JsonNode? value) => Lookup(s_buttonVariant, value);
+    internal static string ButtonVariant(JsonNode? value) => Lookup(s_buttonVariant, value, "default");
 
     /// <summary>
-    /// The class for a <c>Divider</c> <c>axis</c>, or null when the value is not in the enumeration.
+    /// The class for a <c>Divider</c> <c>axis</c>; a missing value, or one outside the enumeration, gives the catalog default.
     /// </summary>
-    internal static string? Axis(JsonNode? value) => Lookup(s_axis, value);
+    internal static string Axis(JsonNode? value) => Lookup(s_axis, value, "horizontal");
 
     /// <summary>
-    /// The class for a <c>ChoicePicker</c> <c>displayStyle</c>, or null when the value is not in the enumeration.
+    /// The class for a <c>ChoicePicker</c> <c>displayStyle</c>; a missing value, or one outside the enumeration, gives the catalog default.
     /// </summary>
-    internal static string? DisplayStyle(JsonNode? value) => Lookup(s_displayStyle, value);
+    internal static string DisplayStyle(JsonNode? value) => Lookup(s_displayStyle, value, "checkbox");
 
     /// <summary>
     /// The class for a <c>weight</c>: the number rounded to a whole weight from 1 to <see cref="MaxWeight"/>,
@@ -165,10 +165,15 @@ internal static class A2UIClasses
     }
 
     /// <summary>
-    /// Looks up a literal string value; dynamic values and values outside the enumeration give null.
+    /// Looks up a literal string value. A missing value, a dynamic value or one outside the enumeration gives the
+    /// class of <paramref name="defaultValue"/>, the catalog's declared default, since the core keeps the agent's
+    /// properties as sent and does not fill in schema defaults.
     /// </summary>
-    private static string? Lookup(FrozenDictionary<string, string> map, JsonNode? value) =>
-        A2UIValues.AsString(value) is { } key && map.TryGetValue(key, out string? css) ? css : null;
+    /// <param name="map">The enumeration's classes.</param>
+    /// <param name="value">The property value.</param>
+    /// <param name="defaultValue">The catalog default; it must be in <paramref name="map"/>.</param>
+    private static string Lookup(FrozenDictionary<string, string> map, JsonNode? value, string defaultValue) =>
+        A2UIValues.AsString(value) is { } key && map.TryGetValue(key, out string? css) ? css : map[defaultValue];
 
     /// <summary>
     /// Builds an enumeration map whose class names are the prefix followed by the value in kebab case.

@@ -4,7 +4,7 @@
     CheckOutcome checks = Checks();
 }
 <button type="button" disabled="@(!checks.IsValid)" @onclick="RunActionAsync"
-        class="@A2UIClasses.Join("a2ui-button", A2UIClasses.ButtonVariant(Raw("variant")) ?? "a2ui-button-default", WeightClass)" @attributes="AccessibilityAttributes()">
+        class="@A2UIClasses.Join("a2ui-button", A2UIClasses.ButtonVariant(Raw("variant")), WeightClass)" @attributes="AccessibilityAttributes()">
     @foreach ((ComponentInstance child, EvaluationContext childContext) in Children("child"))
     {
         <A2UIChild Surface="Surface" Component="child" Context="childContext" Depth="Depth + 1" />

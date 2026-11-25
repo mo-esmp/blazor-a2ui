@@ -83,7 +83,7 @@ public sealed class A2UISurfaceTests
     }
 
     /// <summary>
-    /// Proves that a layout value outside its enumeration selects no class and never reaches the markup.
+    /// Proves that a layout value outside its enumeration never reaches the markup; the catalog default is used instead.
     /// </summary>
     [Fact]
     public void Render_LayoutValueOutsideEnumeration_IsIgnored()
@@ -98,7 +98,7 @@ public sealed class A2UISurfaceTests
         IRenderedComponent<A2UISurface> surface = host.Render();
 
         // Assert
-        surface.Find(".a2ui-row").ClassList.ShouldNotContain(c => c.StartsWith("a2ui-justify-", StringComparison.Ordinal));
+        surface.Find(".a2ui-row").ClassList.Where(c => c.StartsWith("a2ui-justify-", StringComparison.Ordinal)).ShouldBe(["a2ui-justify-start"]);
         surface.Markup.ShouldNotContain("evil.test");
         surface.FindAll("[style]").ShouldBeEmpty();
     }
@@ -132,6 +132,62 @@ public sealed class A2UISurfaceTests
         action?["name"]?.GetValue<string>().ShouldBe("submit");
         action?["context"]?["who"]?.GetValue<string>().ShouldBe("Ada");
         notified.ShouldHaveSingleItem().ComponentId.ShouldBe("root");
+    }
+
+    /// <summary>
+    /// Proves that a button whose action fails is reported by the processor and does not tell the page that it ran.
+    /// </summary>
+    [Fact]
+    public void Click_ButtonWithInvalidAction_DoesNotNotifyPage()
+    {
+        // Arrange
+        using A2UITestHost host = new();
+        host.Load(
+            """
+            [
+              {"id":"root","component":"Button","child":"label","action":{"event":{"name":""}}},
+              {"id":"label","component":"Text","text":"Send"}
+            ]
+            """);
+        List<A2UIActionEventArgs> notified = [];
+        List<string> errors = [];
+        host.Processor.ErrorReported += e => errors.Add(e.Code);
+        IRenderedComponent<A2UISurface> surface = host.Render(notified.Add);
+
+        // Act
+        surface.Find("button").Click();
+
+        // Assert
+        notified.ShouldBeEmpty();
+        host.Sent.ShouldNotContain(m => m.Kind == "action");
+        errors.ShouldNotBeEmpty();
+    }
+
+    /// <summary>
+    /// Proves that absent layout options render the catalog defaults (<c>justify: start</c>, <c>align: stretch</c>,
+    /// <c>direction: vertical</c>, <c>variant: body</c>), since the core keeps properties as the agent sent them.
+    /// </summary>
+    [Fact]
+    public void Render_LayoutOptionsAbsent_RendersCatalogDefaults()
+    {
+        // Arrange
+        using A2UITestHost host = new();
+        host.Load("""
+            [
+              {"id":"root","component":"Column","children":["list"]},
+              {"id":"list","component":"List","children":["t"]},
+              {"id":"t","component":"Text","text":"x"}
+            ]
+            """);
+
+        // Act
+        IRenderedComponent<A2UISurface> surface = host.Render();
+
+        // Assert
+        surface.Find(".a2ui-column").ClassList.ShouldContain("a2ui-justify-start");
+        surface.Find(".a2ui-column").ClassList.ShouldContain("a2ui-align-stretch");
+        surface.Find(".a2ui-list").ClassList.ShouldContain("a2ui-direction-vertical");
+        surface.Find(".a2ui-text").ClassList.ShouldContain("a2ui-text-body");
     }
 
     /// <summary>

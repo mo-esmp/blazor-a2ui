@@ -1300,7 +1300,8 @@ public sealed class MessageProcessor : IDisposable
     /// <summary>
     /// Runs an action for a component after a user gesture. Failures are reported, never thrown.
     /// </summary>
-    internal async Task DispatchActionAsync(
+    /// <returns>True when the action ran: its event was sent or its function call completed. False when the component has no action or the action failed; the failure was reported.</returns>
+    internal async Task<bool> DispatchActionAsync(
         Surface surface,
         ComponentInstance component,
         JsonNode? action,
@@ -1308,13 +1309,20 @@ public sealed class MessageProcessor : IDisposable
         JsonObject? metadata,
         CancellationToken cancellationToken)
     {
+        if (action is null)
+        {
+            return false;
+        }
+
         try
         {
             await DispatchActionCoreAsync(surface, component.Id, action, context, metadata, userActivated: true, cancellationToken).ConfigureAwait(false);
+            return true;
         }
         catch (A2UIException ex)
         {
             ReportActionError(surface, ex);
+            return false;
         }
     }
 

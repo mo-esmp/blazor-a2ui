@@ -83,6 +83,11 @@ component and function definitions. Map a custom component to your own Razor com
 inherits `A2UIComponentBase`, with `options.Components.Register<MyChart>("Chart", catalogId)`.
 `options.Components.Unregister("Video")` turns a component off; it then renders a placeholder.
 
+### Differences from the specification
+
+- `DateTimeInput`: the catalog defaults both `enableDate` and `enableTime` to false, which would
+  leave an input that accepts nothing. When neither is enabled, the renderer shows a date input.
+
 ## Getting started in a Blazor app
 
 **1. Add the package:**

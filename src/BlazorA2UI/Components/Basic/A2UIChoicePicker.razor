@@ -2,10 +2,11 @@
 
 @{
     CheckOutcome checks = Checks();
-    bool single = A2UIValues.AsString(Raw("variant")) == "mutuallyExclusive";
+    // The catalog default is mutuallyExclusive: only an explicit multipleSelection allows several values.
+    bool single = A2UIValues.AsString(Raw("variant")) != "multipleSelection";
     HashSet<string> selected = Selected();
 }
-<fieldset class="@A2UIClasses.Join("a2ui-field", "a2ui-choice-picker", A2UIClasses.DisplayStyle(Raw("displayStyle")) ?? "a2ui-choices-checkbox", checks.IsValid ? null : "a2ui-invalid", WeightClass)" @attributes="AccessibilityAttributes()">
+<fieldset class="@A2UIClasses.Join("a2ui-field", "a2ui-choice-picker", A2UIClasses.DisplayStyle(Raw("displayStyle")), checks.IsValid ? null : "a2ui-invalid", WeightClass)" @attributes="AccessibilityAttributes()">
     @if (OptionalText("label") is { Length: > 0 } legendText)
     {
         <legend class="a2ui-field-label">@legendText</legend>

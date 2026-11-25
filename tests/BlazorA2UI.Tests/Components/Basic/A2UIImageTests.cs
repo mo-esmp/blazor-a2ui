@@ -67,4 +67,23 @@ public sealed class A2UIImageTests
             surface.Markup.ShouldNotContain("evil.test");
         });
     }
+
+    /// <summary>
+    /// Proves that an image without <c>variant</c> or <c>fit</c> renders the catalog defaults, <c>mediumFeature</c> and <c>fill</c>.
+    /// </summary>
+    [Fact]
+    public void Render_NoVariantOrFit_RendersCatalogDefaults()
+    {
+        // Arrange
+        using A2UITestHost host = new(options => options.Media.Allow("https://cdn.example.com/"));
+        host.Load("""[{"id":"root","component":"Image","url":"https://cdn.example.com/cat.png"}]""");
+
+        // Act
+        IRenderedComponent<A2UISurface> surface = host.Render();
+
+        // Assert
+        AngleSharp.Dom.IElement image = surface.Find("img");
+        image.ClassList.ShouldContain("a2ui-image-medium-feature");
+        image.ClassList.ShouldContain("a2ui-fit-fill");
+    }
 }

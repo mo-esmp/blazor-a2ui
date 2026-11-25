@@ -144,12 +144,11 @@ public abstract class A2UIComponentBase : ComponentBase
 
     /// <summary>
     /// Runs the component's <c>action</c> after a user gesture, then tells the page through the surface host.
-    /// Failures are reported by the processor and stop the action.
+    /// Failures are reported by the processor and stop the action; the page is told only about an action that ran.
     /// </summary>
     protected async Task RunActionAsync()
     {
-        await Surface.DispatchActionAsync(Component, Context);
-        if (Host is not null)
+        if (await Surface.DispatchActionAsync(Component, Context) && Host is not null)
         {
             await Host.NotifyActionAsync(Component, Context);
         }
