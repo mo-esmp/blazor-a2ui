@@ -4,14 +4,16 @@ A Blazor renderer for [A2UI](https://a2ui.org) **v1.0**, the Agent-to-UI protoco
 streams JSON messages that describe a UI, and the renderer draws it with native components,
 keeps a data model, and sends the user's actions back.
 
-> **Status: preview, in progress.** This repository is being built as a series of pull requests:
+> **Status: preview.** The protocol core (`BlazorA2UI.Core`) is merged and passes Google's
+> conformance suites. The Razor components and the agent-side helpers are being built next, so
+> the sections below marked *planned* describe the API they will have. Names may still change
+> before the first release.
 >
-> 1. **Protocol core** (`BlazorA2UI.Core`): messages, data model, bindings, functions, catalogs,
->    validation and agent/renderer function calls. *This PR.*
-> 2. **Blazor components** (`BlazorA2UI`): the basic catalog as Razor components, with the safety
->    rules below.
-> 3. **Agent side and samples** (`BlazorA2UI.Agent`): message builders, a streaming endpoint and a
->    sample app.
+> | Part | Package | State |
+> | --- | --- | --- |
+> | Protocol core: messages, data model, bindings, functions, catalogs, validation, agent and renderer function calls | `BlazorA2UI.Core` | Done |
+> | Blazor components: the basic catalog as Razor components, with the safety rules below | `BlazorA2UI` | Planned (PR 2) |
+> | Agent side: message builders, a streaming endpoint, and sample apps | `BlazorA2UI.Agent` | Planned (PR 3) |
 
 ## Why a new renderer
 
@@ -42,32 +44,134 @@ A model writes the UI, so everything in a message is treated as untrusted input:
 The core enforces the parts that are protocol-level (URL schemes, user activation, regex safety,
 limits); the component library enforces the rendering rules.
 
+## Hosting models
+
+The core has no UI dependency, and the components use only standard Blazor features: no
+JavaScript interop and no inline styles. So the same packages are meant to work in every Blazor
+hosting model:
+
+| Hosting model | Supported |
+| --- | --- |
+| Blazor Server (interactive server rendering) | Yes (planned with PR 2) |
+| Blazor WebAssembly, standalone or hosted | Yes (planned with PR 2) |
+| Blazor Web App with `InteractiveAuto` | Yes (planned with PR 2) |
+| Static server-side rendering (no interactivity) | Display only: surfaces render, but inputs and actions need an interactive render mode |
+| .NET MAUI Blazor Hybrid | Expected to work, not tested yet |
+
+The core alone (`BlazorA2UI.Core`) runs anywhere .NET 10 runs, including a plain server process
+that validates or pre-processes agent output.
+
+## Components
+
+The basic catalog from the A2UI v1.0 specification
+(`https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json`) has 18 components. The core
+already parses and validates all of them. Their Razor versions come with PR 2.
+
+| Category | Components | Notes |
+| --- | --- | --- |
+| Display | `Text`, `Icon`, `Divider` | `Text` renders plain text. Markdown, if added, will never load images or links on its own. |
+| Media | `Image`, `Video`, `AudioPlayer` | Rendered only through the host's media allowlist; otherwise a blocked placeholder. |
+| Layout | `Row`, `Column`, `List`, `Card`, `Tabs`, `Modal` | `justify`, `align` and the like map to CSS classes. `List` supports templates with `@index`. |
+| Input | `Button`, `TextField`, `CheckBox`, `ChoicePicker`, `Slider`, `DateTimeInput` | Two-way bound to the data model, with `@checks` validation messages. |
+
+The catalog's 14 functions are implemented in the core: `required`, `regex`, `length`,
+`numeric`, `email`, `formatString`, `formatNumber`, `formatCurrency`, `formatDate`, `pluralize`,
+`openUrl`, `and`, `or` and `not`. Any other function a message calls is sent to the agent with
+`callAgentFunction`.
+
+Custom catalogs and components are supported by the core: register a `Catalog` with your own
+component and function definitions. Mapping a custom component to your own Razor component is
+planned for PR 2.
+
+## Getting started in a Blazor app (planned, PR 2)
+
+**1. Add the package:**
+
+```sh
+dotnet add package BlazorA2UI
+```
+
+**2. Register the services in `Program.cs`:**
+
+```csharp
+builder.Services.AddA2UI(options =>
+{
+    // Media load only from URLs the host allows. Without this, media render as placeholders.
+    options.Media.Allow("https://cdn.example.com/");
+});
+
+// Optional: let openUrl open links. Without a launcher it does nothing.
+builder.Services.AddScoped<IA2UIUrlLauncher, MyUrlLauncher>();
+```
+
+**3. Add the stylesheet** to `App.razor` (Blazor Web App) or `wwwroot/index.html` (standalone
+WebAssembly):
+
+```html
+<link href="_content/BlazorA2UI/a2ui.css" rel="stylesheet" />
+```
+
+**4. Render a surface** in any page or component:
+
+```razor
+@using BlazorA2UI.Components
+
+<A2UISurface SurfaceId="my-surface" OnAction="HandleAction" />
+```
+
+**5. Stream the agent's messages** into the scoped processor:
+
+```csharp
+@inject MessageProcessor Processor
+@inject HttpClient Http
+
+protected override async Task OnInitializedAsync()
+{
+    using HttpResponseMessage response = await Http.GetAsync(
+        "https://my-agent/stream", HttpCompletionOption.ResponseHeadersRead);
+    using StreamReader reader = new(await response.Content.ReadAsStreamAsync());
+    while (await reader.ReadLineAsync() is { } line)
+    {
+        Processor.ProcessLine(line);   // <A2UISurface> re-renders as messages arrive
+    }
+}
+```
+
+In Blazor Server the stream is read on the server; in WebAssembly it is read in the browser, so
+the agent endpoint must allow your app's origin (CORS).
+
 ## Projects
 
 | Project | Package | What it is |
 | --- | --- | --- |
 | `src/BlazorA2UI.Core` | `BlazorA2UI.Core` | The protocol engine. No UI dependency. |
 | `tests/BlazorA2UI.Core.Tests` | | Unit and conformance tests. |
+| `src/BlazorA2UI` | `BlazorA2UI` | Razor components. Planned (PR 2). |
+| `src/BlazorA2UI.Agent` | `BlazorA2UI.Agent` | Agent-side builders and endpoint. Planned (PR 3). |
+| `samples/` | | Blazor Server and WebAssembly sample apps and a sample agent. Planned (PR 3). |
 
-## Using the core
+## Using the core directly (available now)
 
 ```csharp
 using BlazorA2UI.Catalogs;
 using BlazorA2UI.Processing;
 
-var processor = new MessageProcessor([BasicCatalog.Create()]);
+MessageProcessor processor = new([BasicCatalog.Create()]);
 
 // Renderer-to-agent messages (actions, agent function calls, errors) go to your transport.
-processor.Outbound = async message => await transport.SendAsync(message.Message, message.Metadata);
+processor.Outbound = message => transport.SendAsync(message.Message, message.Metadata);
 
 // Feed agent-to-renderer messages as they stream in (JSONL lines, arrays or single objects).
+// Malformed input never throws: it is reported through processor.ErrorReported.
 processor.ProcessLine(line);
 
-var surface = processor.Surfaces["main"];
-var root = surface.Root;                         // the component tree starts here
-var text = new A2UIBinding(surface, root!["text"], surface.RootContext);
-text.Refresh();                                  // evaluates bindings and function calls
-surface.Changed += () => text.Refresh();         // re-evaluate when data or agent answers change
+Surface surface = processor.Surfaces["main"];
+if (surface.Root is { } root)                    // the component tree starts here
+{
+    A2UIBinding text = new(surface, root.Properties["text"], surface.RootContext);
+    text.Refresh();                              // evaluates bindings and function calls
+    surface.Changed += () => text.Refresh();     // re-evaluate when data or agent answers change
+}
 ```
 
 By default the processor behaves like a streaming renderer: components may arrive in any order,
