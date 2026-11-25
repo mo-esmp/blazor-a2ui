@@ -1,0 +1,26 @@
+@inherits A2UIComponentBase
+@inject IA2UIMediaResolver MediaResolver
+
+@if (Resolve() is { } source)
+{
+    <img src="@source" alt="@Text("description")" loading="lazy" referrerpolicy="no-referrer"
+         class="@A2UIClasses.Join("a2ui-image", A2UIClasses.ImageVariant(Raw("variant")), A2UIClasses.Fit(Raw("fit")), WeightClass)" @attributes="AccessibilityAttributes()" />
+}
+else
+{
+    <div role="img" aria-label="@BlockedLabel()" class="@A2UIClasses.Join("a2ui-media-blocked", "a2ui-image", A2UIClasses.ImageVariant(Raw("variant")), WeightClass)">
+        <span class="a2ui-media-blocked-text">Image not loaded</span>
+    </div>
+}
+
+@code {
+    /// <summary>
+    /// The URL the host allows for the image, or null when it is blocked.
+    /// </summary>
+    private string? Resolve() => MediaUrls.Resolve(MediaResolver, A2UIMediaKind.Image, OptionalText("url"), Surface, Component);
+
+    /// <summary>
+    /// The accessible name of the blocked placeholder: the image's description, or a generic name.
+    /// </summary>
+    private string BlockedLabel() => OptionalText("description") is { Length: > 0 } description ? description : "Image not loaded";
+}

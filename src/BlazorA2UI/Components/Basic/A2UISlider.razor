@@ -1,0 +1,39 @@
+@inherits A2UIComponentBase
+
+@{
+    CheckOutcome checks = Checks();
+    double min = Number("min") ?? 0;
+    double max = Number("max") ?? 100;
+    double value = Math.Clamp(Number("value") ?? min, Math.Min(min, max), Math.Max(min, max));
+}
+<label class="@A2UIClasses.Join("a2ui-field", "a2ui-slider", checks.IsValid ? null : "a2ui-invalid", WeightClass)" @attributes="AccessibilityAttributes()">
+    <span class="a2ui-field-label">@Text("label")</span>
+    <input type="range" min="@Format(min)" max="@Format(max)" step="@Step(min, max)" value="@Format(value)" aria-invalid="@(!checks.IsValid)" @onchange="OnChange" />
+    <output class="a2ui-slider-value">@A2UIValues.FormatNumber(value)</output>
+</label>
+<A2UIFieldErrors Outcome="checks" />
+
+@code {
+    /// <summary>
+    /// Formats a number for an HTML attribute, independent of culture.
+    /// </summary>
+    private static string Format(double value) => value.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// The step between values: the range divided into <c>steps</c> parts, or any value when <c>steps</c> is missing or not positive.
+    /// </summary>
+    private string Step(double min, double max) =>
+        Number("steps") is { } steps && steps >= 1 && max > min ? Format((max - min) / Math.Floor(steps)) : "any";
+
+    /// <summary>
+    /// Writes the new value to the bound number.
+    /// </summary>
+    private void OnChange(ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double value)
+            && double.IsFinite(value))
+        {
+            Write("value", JsonValue.Create(value));
+        }
+    }
+}

@@ -1,0 +1,17 @@
+@inherits A2UIComponentBase
+
+@{
+    CheckOutcome checks = Checks();
+}
+<label class="@A2UIClasses.Join("a2ui-field", "a2ui-checkbox", checks.IsValid ? null : "a2ui-invalid", WeightClass)" @attributes="AccessibilityAttributes()">
+    <input type="checkbox" checked="@Boolean("value")" aria-invalid="@(!checks.IsValid)" @onchange="OnChange" />
+    <span class="a2ui-field-label">@Text("label")</span>
+</label>
+<A2UIFieldErrors Outcome="checks" />
+
+@code {
+    /// <summary>
+    /// Writes the new checked state to the bound value.
+    /// </summary>
+    private void OnChange(ChangeEventArgs e) => Write("value", JsonValue.Create(e.Value is true || string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase)));
+}

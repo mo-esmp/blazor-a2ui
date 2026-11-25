@@ -1,0 +1,22 @@
+@inherits A2UIComponentBase
+
+@{
+    CheckOutcome checks = Checks();
+    // Both default to false in the catalog. An input that allows neither could not be used, so that case
+    // renders a date input (see README, "Differences from the specification").
+    bool date = Boolean("enableDate");
+    bool time = Boolean("enableTime");
+    string type = (date, time) switch { (true, true) => "datetime-local", (false, true) => "time", _ => "date" };
+}
+<label class="@A2UIClasses.Join("a2ui-field", "a2ui-date-time", checks.IsValid ? null : "a2ui-invalid", WeightClass)" @attributes="AccessibilityAttributes()">
+    <span class="a2ui-field-label">@Text("label")</span>
+    <input type="@type" value="@Text("value")" min="@OptionalText("min")" max="@OptionalText("max")" aria-invalid="@(!checks.IsValid)" @onchange="OnChange" />
+</label>
+<A2UIFieldErrors Outcome="checks" />
+
+@code {
+    /// <summary>
+    /// Writes the chosen date or time, as the input reports it in ISO 8601 form, to the bound value.
+    /// </summary>
+    private void OnChange(ChangeEventArgs e) => Write("value", JsonValue.Create(e.Value?.ToString() ?? string.Empty));
+}

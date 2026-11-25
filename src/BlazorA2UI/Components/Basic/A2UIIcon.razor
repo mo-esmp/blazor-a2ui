@@ -1,0 +1,39 @@
+@inherits A2UIComponentBase
+
+@{
+    JsonNode? name = Name();
+}
+@if (SvgPath(name) is { } path)
+{
+    <svg viewBox="0 0 24 24" class="@A2UIClasses.Join("a2ui-icon", WeightClass)" aria-hidden="true" focusable="false" @attributes="AccessibilityAttributes()">
+        <path d="@path" />
+    </svg>
+}
+else if (A2UIIcons.ClassFor(name) is { } iconClass)
+{
+    <span class="@A2UIClasses.Join("a2ui-icon", iconClass, WeightClass)" aria-hidden="true" @attributes="AccessibilityAttributes()"></span>
+}
+
+@code {
+    /// <summary>
+    /// The icon's <c>name</c>: an icon name, or an object with an <c>svgPath</c>. A literal object's <c>svgPath</c>
+    /// may itself be bound, so it is evaluated; any other value (a binding or a call) is evaluated as a whole, and the
+    /// object or name it yields is used as data.
+    /// </summary>
+    private JsonNode? Name()
+    {
+        if (Raw("name") is JsonObject literal && literal.ContainsKey("svgPath"))
+        {
+            return new JsonObject { ["svgPath"] = Surface.Evaluate(literal["svgPath"], Context, out _)?.DeepClone() };
+        }
+
+        return Property("name");
+    }
+
+    /// <summary>
+    /// The <c>svgPath</c> of a resolved name, when it has one and it is valid SVG path data; otherwise null.
+    /// </summary>
+    /// <param name="name">The resolved name.</param>
+    private static string? SvgPath(JsonNode? name) =>
+        name is JsonObject icon ? A2UIIcons.ValidPath(A2UIValues.AsString(icon["svgPath"])) : null;
+}

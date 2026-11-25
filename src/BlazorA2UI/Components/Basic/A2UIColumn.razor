@@ -1,0 +1,11 @@
+@inherits A2UIComponentBase
+
+<div class="@A2UIClasses.Join("a2ui-column", A2UIClasses.Justify(Raw("justify")), A2UIClasses.Align(Raw("align")), WeightClass)" @attributes="AccessibilityAttributes()">
+    @foreach ((ComponentInstance child, EvaluationContext childContext, string key) in KeyedChildren("children"))
+    {
+        <A2UIChild @key="key" Surface="Surface" Component="child" Context="childContext" Depth="Depth + 1" />
+    }
+</div>
+
+@code {
+}

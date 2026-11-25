@@ -428,14 +428,16 @@ public sealed class Surface
     /// Runs a component's <c>action</c> after a user gesture: sends an <c>event</c> to the agent,
     /// or runs a local <c>functionCall</c>. Failures are reported and stop the action.
     /// </summary>
-    public Task DispatchActionAsync(ComponentInstance component, EvaluationContext context, CancellationToken cancellationToken = default) =>
+    /// <returns>True when the action ran; false when the component has no action or the action failed and was reported.</returns>
+    public Task<bool> DispatchActionAsync(ComponentInstance component, EvaluationContext context, CancellationToken cancellationToken = default) =>
         Processor.DispatchActionAsync(this, component, component.Properties["action"], context, metadata: null, cancellationToken);
 
     /// <summary>
     /// Runs a component's <c>action</c> after a user gesture, attaching the host's <paramref name="metadata"/>
     /// (<c>{"extensions": {...}}</c>) to a dispatched event. Failures, including invalid metadata, are reported and stop the action.
     /// </summary>
-    public Task DispatchActionAsync(ComponentInstance component, EvaluationContext context, JsonObject? metadata, CancellationToken cancellationToken = default) =>
+    /// <returns>True when the action ran; false when the component has no action or the action failed and was reported.</returns>
+    public Task<bool> DispatchActionAsync(ComponentInstance component, EvaluationContext context, JsonObject? metadata, CancellationToken cancellationToken = default) =>
         Processor.DispatchActionAsync(this, component, component.Properties["action"], context, metadata, cancellationToken);
 
     /// <summary>
