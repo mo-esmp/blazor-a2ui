@@ -1423,7 +1423,8 @@ public sealed class MessageProcessor : IDisposable
             body["metadata"] = checkedMetadata;
         }
 
-        await SendOutboundAsync(new JsonObject { ["version"] = A2UIProtocol.Version, ["action"] = body }).ConfigureAwait(false);
+        // An action counts as run only when the agent's transport took it: a missing or failing transport fails the action.
+        await SendOutboundAsync(new JsonObject { ["version"] = A2UIProtocol.Version, ["action"] = body }, throwOnFailure: true).ConfigureAwait(false);
         return null;
     }
 
@@ -1497,12 +1498,26 @@ public sealed class MessageProcessor : IDisposable
     internal void SendOutbound(JsonObject message) => Track(SendOutboundAsync(message));
 
     /// <summary>
-    /// Sends a message to the agent with the renderer's data model attached when surfaces ask for it. Does nothing without a transport.
+    /// Sends a message to the agent with the renderer's data model attached when surfaces ask for it.
     /// </summary>
-    private async Task SendOutboundAsync(JsonObject message)
+    /// <param name="message">The message to send.</param>
+    /// <param name="throwOnFailure">
+    /// False: without a transport nothing happens, and a failing transport is reported through <see cref="ErrorReported"/>.
+    /// True: both throw instead, so the caller can fail what it was doing and report it once.
+    /// </param>
+    /// <exception cref="A2UIException">
+    /// Only with <paramref name="throwOnFailure"/>: there is no transport (<see cref="A2UIErrorCodes.NoListener"/>) or it failed
+    /// (<see cref="A2UIErrorCodes.ExecutionError"/>).
+    /// </exception>
+    private async Task SendOutboundAsync(JsonObject message, bool throwOnFailure = false)
     {
         if (Outbound is not { } outbound)
         {
+            if (throwOnFailure)
+            {
+                throw new A2UIException(A2UIErrorCodes.NoListener, "The renderer has no connection to the agent, so the message was not sent.");
+            }
+
             return;
         }
 
@@ -1514,7 +1529,13 @@ public sealed class MessageProcessor : IDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            ErrorReported?.Invoke(new A2UIErrorReport(A2UIErrorCodes.ExecutionError, $"Sending a message to the agent failed: {ex.Message}", null, null, null));
+            A2UIException failure = new(A2UIErrorCodes.ExecutionError, $"Sending a message to the agent failed: {ex.Message}");
+            if (throwOnFailure)
+            {
+                throw failure;
+            }
+
+            ErrorReported?.Invoke(new A2UIErrorReport(failure.Code, failure.Message, null, null, null));
         }
     }
 

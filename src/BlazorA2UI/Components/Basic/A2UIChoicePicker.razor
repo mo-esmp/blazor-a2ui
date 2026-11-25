@@ -5,13 +5,19 @@
     // The catalog default is mutuallyExclusive: only an explicit multipleSelection allows several values.
     bool single = A2UIValues.AsString(Raw("variant")) != "multipleSelection";
     HashSet<string> selected = Selected();
+    bool filterable = Raw("filterable") is JsonValue filterFlag && filterFlag.TryGetValue(out bool isFilterable) && isFilterable;
+    if (!filterable)
+    {
+        // A streamed update can turn filtering off while a query is typed; the hidden box must not keep hiding options.
+        _filter = string.Empty;
+    }
 }
 <fieldset class="@A2UIClasses.Join("a2ui-field", "a2ui-choice-picker", A2UIClasses.DisplayStyle(Raw("displayStyle")), checks.IsValid ? null : "a2ui-invalid", WeightClass)" @attributes="AccessibilityAttributes()">
     @if (OptionalText("label") is { Length: > 0 } legendText)
     {
         <legend class="a2ui-field-label">@legendText</legend>
     }
-    @if (Raw("filterable") is JsonValue filterable && filterable.TryGetValue(out bool isFilterable) && isFilterable)
+    @if (filterable)
     {
         <input type="search" class="a2ui-choice-filter" aria-label="Filter options" value="@_filter" @oninput="e => _filter = e.Value?.ToString() ?? string.Empty" />
     }
@@ -94,28 +100,44 @@
     }
 
     /// <summary>
-    /// Writes the new selection: the one value for a mutually exclusive picker, or the set with this value added or removed.
+    /// Writes the new selection. A mutually exclusive picker holds just the chosen value. A multiple-selection
+    /// picker applies this one change to the bound list, so values it does not render (past <see cref="MaxOptions"/>
+    /// or filtered out) and their order are kept.
     /// </summary>
+    /// <param name="value">The option the user changed.</param>
+    /// <param name="single">Whether the picker is mutually exclusive.</param>
+    /// <param name="e">The change, whose value says whether the option is now checked.</param>
     private void Toggle(string value, bool single, ChangeEventArgs e)
     {
         bool on = e.Value is true || string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase) || (single && e.Value is string);
-        HashSet<string> selected = single ? new HashSet<string>(StringComparer.Ordinal) : Selected();
-        if (on)
+        if (single)
         {
-            selected.Add(value);
-        }
-        else
-        {
-            selected.Remove(value);
+            Write("value", on ? new JsonArray(JsonValue.Create(value)) : new JsonArray());
+            return;
         }
 
         JsonArray next = [];
-        foreach ((string option, string _) in Options())
+        bool present = false;
+        if (Property("value") is JsonArray current)
         {
-            if (selected.Contains(option))
+            foreach (JsonNode? item in current)
             {
-                next.Add(option);
+                if (A2UIValues.AsString(item) == value)
+                {
+                    present = true;
+                    if (!on)
+                    {
+                        continue;
+                    }
+                }
+
+                next.Add(item?.DeepClone());
             }
+        }
+
+        if (on && !present)
+        {
+            next.Add(value);
         }
 
         Write("value", next);

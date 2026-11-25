@@ -199,3 +199,7 @@
 /* Unknown or unsafe components */
 
 .a2ui-placeholder { color: var(--a2ui-muted); font-size: 0.85em; border: 1px dashed var(--a2ui-border); border-radius: var(--a2ui-radius); padding: 0.25rem 0.5rem; }
+
+/* Focus guards around an open modal: focusable, but take no space and show nothing. */
+.a2ui-focus-guard { position: fixed; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.a2ui-modal:focus { outline: none; }

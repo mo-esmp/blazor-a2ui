@@ -1,7 +1,7 @@
 @inherits A2UIComponentBase
 
 <div class="@A2UIClasses.Join("a2ui-modal-host", WeightClass)" @attributes="AccessibilityAttributes()">
-    <div class="a2ui-modal-trigger" @onclick="() => _open = true">
+    <div class="a2ui-modal-trigger" tabindex="-1" @ref="_trigger" @onclick="Open">
         @foreach ((ComponentInstance trigger, EvaluationContext triggerContext) in Children("trigger"))
         {
             <A2UIChild Surface="Surface" Component="trigger" Context="triggerContext" Depth="Depth + 1" />
@@ -9,14 +9,17 @@
     </div>
     @if (_open)
     {
-        <div class="a2ui-modal-backdrop" @onclick="() => _open = false"></div>
-        <div role="dialog" aria-modal="true" class="a2ui-modal">
-            <button type="button" class="a2ui-modal-close" aria-label="Close" @onclick="() => _open = false">×</button>
+        <div class="a2ui-modal-backdrop" @onclick="Close"></div>
+        @* The guards around the dialog catch Tab and Shift+Tab leaving it and send focus back inside. *@
+        <div class="a2ui-focus-guard" tabindex="0" @onfocus="FocusDialogAsync"></div>
+        <div role="dialog" aria-modal="true" class="a2ui-modal" tabindex="-1" @ref="_dialog" @onkeydown="OnKeyDown">
+            <button type="button" class="a2ui-modal-close" aria-label="Close" @onclick="Close">×</button>
             @foreach ((ComponentInstance content, EvaluationContext contentContext) in Children("content"))
             {
                 <A2UIChild Surface="Surface" Component="content" Context="contentContext" Depth="Depth + 1" />
             }
         </div>
+        <div class="a2ui-focus-guard" tabindex="0" @onfocus="FocusDialogAsync"></div>
     }
 </div>
 
@@ -25,4 +28,113 @@
     /// Whether the modal's content is shown.
     /// </summary>
     private bool _open;
+
+    /// <summary>
+    /// The focus move the next render owes: into the dialog after opening, back to the trigger after closing.
+    /// </summary>
+    private FocusMove _pendingFocus;
+
+    /// <summary>
+    /// The element that wraps the trigger; focus returns here when the modal closes.
+    /// </summary>
+    private ElementReference _trigger;
+
+    /// <summary>
+    /// The dialog element; it takes focus when the modal opens.
+    /// </summary>
+    private ElementReference _dialog;
+
+    /// <summary>
+    /// Where focus goes after a render.
+    /// </summary>
+    private enum FocusMove
+    {
+        /// <summary>
+        /// Focus stays where it is.
+        /// </summary>
+        None,
+
+        /// <summary>
+        /// Focus moves into the dialog.
+        /// </summary>
+        Dialog,
+
+        /// <summary>
+        /// Focus returns to the trigger.
+        /// </summary>
+        Trigger,
+    }
+
+    /// <summary>
+    /// Opens the modal; focus moves into it after the render.
+    /// </summary>
+    private void Open()
+    {
+        if (!_open)
+        {
+            _open = true;
+            _pendingFocus = FocusMove.Dialog;
+        }
+    }
+
+    /// <summary>
+    /// Closes the modal; focus returns to the trigger after the render.
+    /// </summary>
+    private void Close()
+    {
+        if (_open)
+        {
+            _open = false;
+            _pendingFocus = FocusMove.Trigger;
+        }
+    }
+
+    /// <summary>
+    /// Closes the modal on Escape.
+    /// </summary>
+    /// <param name="e">The key the user pressed inside the dialog.</param>
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            Close();
+        }
+    }
+
+    /// <summary>
+    /// Sends focus back into the dialog when it reaches a guard.
+    /// </summary>
+    private Task FocusDialogAsync() => TryFocusAsync(_dialog);
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        FocusMove move = _pendingFocus;
+        _pendingFocus = FocusMove.None;
+        if (move == FocusMove.Dialog && _open)
+        {
+            await TryFocusAsync(_dialog);
+        }
+        else if (move == FocusMove.Trigger && !_open)
+        {
+            await TryFocusAsync(_trigger);
+        }
+    }
+
+    /// <summary>
+    /// Focuses an element with Blazor's built-in focus call. A focus that cannot happen (no interactive renderer,
+    /// a disconnected circuit, or an element already gone) is skipped: focus is a convenience, not a requirement.
+    /// </summary>
+    /// <param name="element">The element to focus.</param>
+    private static async Task TryFocusAsync(ElementReference element)
+    {
+        try
+        {
+            await element.FocusAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Microsoft.JSInterop.JSException or Microsoft.JSInterop.JSDisconnectedException or TaskCanceledException)
+        {
+            // Nothing to do: the modal still works without the focus move.
+        }
+    }
 }

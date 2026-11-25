@@ -17,6 +17,9 @@ internal sealed class A2UITestHost : IDisposable
     internal A2UITestHost(Action<A2UIOptions>? configure = null)
     {
         Context = new BunitContext();
+
+        // Modal moves focus with Blazor's built-in FocusAsync; loose mode lets those calls succeed and be verified.
+        Context.JSInterop.Mode = JSRuntimeMode.Loose;
         Context.Services.AddA2UI(configure);
         Processor = Context.Services.GetRequiredService<MessageProcessor>();
         Processor.Outbound = message =>

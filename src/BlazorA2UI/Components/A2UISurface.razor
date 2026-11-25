@@ -21,6 +21,11 @@ else
     private Surface? _surface;
 
     /// <summary>
+    /// Set by <see cref="Dispose"/>; queued callbacks check it and do nothing afterwards.
+    /// </summary>
+    private bool _disposed;
+
+    /// <summary>
     /// The processor the component is subscribed to.
     /// </summary>
     private MessageProcessor? _subscribed;
@@ -70,16 +75,16 @@ else
     /// <summary>
     /// Tells the page that an action ran.
     /// </summary>
-    internal Task NotifyActionAsync(ComponentInstance component, EvaluationContext context) =>
-        OnAction.HasDelegate
-            ? OnAction.InvokeAsync(new A2UIActionEventArgs(SurfaceId, component.Id, context))
-            : Task.CompletedTask;
+    /// <param name="action">The action's source, captured when the user acted.</param>
+    internal Task NotifyActionAsync(A2UIActionEventArgs action) =>
+        OnAction.HasDelegate ? OnAction.InvokeAsync(action) : Task.CompletedTask;
 
     /// <summary>
     /// Unsubscribes from the processor and the surface.
     /// </summary>
     public void Dispose()
     {
+        _disposed = true;
         Attach(null);
         Unsubscribe();
     }
@@ -122,37 +127,54 @@ else
     }
 
     /// <summary>
-    /// Shows the surface when the agent creates it.
+    /// Reconciles when a surface with this id is created. The event can come from any thread, so the work is queued
+    /// on the renderer's dispatcher.
     /// </summary>
+    /// <param name="surface">The created surface.</param>
     private void OnSurfaceCreated(Surface surface)
     {
         if (surface.SurfaceId == SurfaceId)
         {
-            _ = InvokeAsync(() =>
-            {
-                Attach(surface);
-                StateHasChanged();
-            });
+            _ = InvokeAsync(Reconcile);
         }
     }
 
     /// <summary>
-    /// Clears the surface when the agent deletes it.
+    /// Reconciles when a surface with this id is deleted, on the renderer's dispatcher like <see cref="OnSurfaceCreated"/>.
     /// </summary>
+    /// <param name="surface">The deleted surface.</param>
     private void OnSurfaceDeleted(Surface surface)
     {
-        if (ReferenceEquals(surface, _surface))
+        if (surface.SurfaceId == SurfaceId)
         {
-            _ = InvokeAsync(() =>
-            {
-                Attach(null);
-                StateHasChanged();
-            });
+            _ = InvokeAsync(Reconcile);
         }
+    }
+
+    /// <summary>
+    /// Attaches to whatever surface the subscribed processor holds for <see cref="SurfaceId"/> now, rather than to the
+    /// surface an event named, so queued create and delete callbacks settle on the current state in any order.
+    /// Does nothing after disposal.
+    /// </summary>
+    private void Reconcile()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        Attach(_subscribed is { } processor && processor.Surfaces.TryGetValue(SurfaceId, out Surface? current) && !current.IsDeleted ? current : null);
+        StateHasChanged();
     }
 
     /// <summary>
     /// Re-renders when the surface's components or data change. The event can come from any thread.
     /// </summary>
-    private void OnSurfaceChanged() => _ = InvokeAsync(StateHasChanged);
+    private void OnSurfaceChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
+    });
 }

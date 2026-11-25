@@ -56,4 +56,44 @@ public sealed class A2UIIconTests
         surface.FindAll("svg").ShouldBeEmpty();
         surface.Markup.ShouldNotContain("evil.test");
     }
+
+    /// <summary>
+    /// Proves that an <c>svgPath</c> object supplied through a data binding is drawn, and still checked as path data.
+    /// </summary>
+    /// <param name="path">The path the data model holds.</param>
+    /// <param name="drawn">Whether it is valid path data and is drawn.</param>
+    [Theory]
+    [InlineData("M0 0L8 8", true)]
+    [InlineData("M0 0\"/><image href=\"https://evil.test/x\"/>", false)]
+    public void Render_BoundSvgPath_RendersOnlyValidPath(string path, bool drawn)
+    {
+        // Arrange
+        using A2UITestHost host = new();
+        JsonObject data = new() { ["icon"] = new JsonObject { ["svgPath"] = path } };
+        host.Load("""[{"id":"root","component":"Icon","name":{"@path":"/icon"}}]""", data.ToJsonString());
+
+        // Act
+        IRenderedComponent<A2UISurface> surface = host.Render();
+
+        // Assert
+        surface.FindAll("path").Count.ShouldBe(drawn ? 1 : 0);
+        surface.Markup.ShouldNotContain("evil.test");
+    }
+
+    /// <summary>
+    /// Proves that a bound icon name renders its class.
+    /// </summary>
+    [Fact]
+    public void Render_BoundName_RendersIconClass()
+    {
+        // Arrange
+        using A2UITestHost host = new();
+        host.Load("""[{"id":"root","component":"Icon","name":{"@path":"/icon"}}]""", """{"icon":"star"}""");
+
+        // Act
+        IRenderedComponent<A2UISurface> surface = host.Render();
+
+        // Assert
+        surface.Find(".a2ui-icon-star").ShouldNotBeNull();
+    }
 }

@@ -7,3 +7,5 @@ global using Bunit;
 global using Microsoft.Extensions.DependencyInjection;
 global using Shouldly;
 global using Xunit;
+global using Microsoft.AspNetCore.Components.Web;
+global using BlazorA2UI.Components.Basic;

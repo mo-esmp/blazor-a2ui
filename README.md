@@ -37,7 +37,8 @@ limits); the component library enforces the rendering rules.
 ## Hosting models
 
 The core has no UI dependency, and the components use only standard Blazor features: no
-JavaScript interop and no inline styles. So the same packages are meant to work in every Blazor
+JavaScript of their own (`Modal` moves focus with Blazor's built-in `FocusAsync`) and no inline
+styles. So the same packages are meant to work in every Blazor
 hosting model:
 
 | Hosting model | Supported |

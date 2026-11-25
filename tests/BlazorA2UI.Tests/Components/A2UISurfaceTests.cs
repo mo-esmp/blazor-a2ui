@@ -164,6 +164,92 @@ public sealed class A2UISurfaceTests
     }
 
     /// <summary>
+    /// Proves that an action whose delivery fails, because the host's transport throws, is reported and does not
+    /// tell the page that it ran.
+    /// </summary>
+    [Fact]
+    public void Click_TransportFails_DoesNotNotifyPage()
+    {
+        // Arrange
+        using A2UITestHost host = new();
+        host.Load(
+            """
+            [
+              {"id":"root","component":"Button","child":"label","action":{"event":{"name":"save"}}},
+              {"id":"label","component":"Text","text":"Save"}
+            ]
+            """);
+        host.Processor.Outbound = _ => throw new InvalidOperationException("The connection dropped.");
+        List<A2UIActionEventArgs> notified = [];
+        List<string> errors = [];
+        host.Processor.ErrorReported += e => errors.Add(e.Message);
+        IRenderedComponent<A2UISurface> surface = host.Render(notified.Add);
+
+        // Act
+        surface.Find("button").Click();
+
+        // Assert
+        notified.ShouldBeEmpty();
+        errors.ShouldContain(m => m.Contains("The connection dropped.", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Proves that siblings keep their own state when the agent reorders them: a filter typed into one picker
+    /// stays with that picker.
+    /// </summary>
+    [Fact]
+    public void Process_SiblingsReordered_StateFollowsComponent()
+    {
+        // Arrange
+        using A2UITestHost host = new();
+        host.Load("""
+            [
+              {"id":"root","component":"Row","children":["a","b"]},
+              {"id":"a","component":"ChoicePicker","label":"A","filterable":true,"options":[{"label":"One","value":"1"}],"value":["1"]},
+              {"id":"b","component":"ChoicePicker","label":"B","filterable":true,"options":[{"label":"One","value":"1"}],"value":["1"]}
+            ]
+            """);
+        IRenderedComponent<A2UISurface> surface = host.Render();
+        surface.FindAll("input[type=search]")[0].Input("typed");
+
+        // Act
+        host.Processor.ProcessOrThrow(JsonNode.Parse("""{"version":"1.0","updateComponents":{"surfaceId":"s","components":[{"id":"root","component":"Row","children":["b","a"]}]}}"""));
+
+        // Assert
+        surface.WaitForAssertion(() =>
+        {
+            AngleSharp.Dom.IElement[] pickers = [.. surface.FindAll("fieldset")];
+            pickers[0].QuerySelector("legend")?.TextContent.ShouldBe("B");
+            pickers[0].QuerySelector("input[type=search]")?.GetAttribute("value").ShouldBe(string.Empty);
+            pickers[1].QuerySelector("legend")?.TextContent.ShouldBe("A");
+            pickers[1].QuerySelector("input[type=search]")?.GetAttribute("value").ShouldBe("typed");
+        });
+    }
+
+    /// <summary>
+    /// Proves that a surface deleted and created again under the same id renders the new surface, and that a
+    /// disposed surface component ignores later lifecycle events.
+    /// </summary>
+    [Fact]
+    public void Process_SurfaceRecreatedThenDisposed_TracksCurrentSurface()
+    {
+        // Arrange
+        using A2UITestHost host = new();
+        host.Load("""[{"id":"root","component":"Text","text":"First"}]""");
+        IRenderedComponent<A2UISurface> surface = host.Render();
+
+        // Act
+        host.Processor.ProcessOrThrow(JsonNode.Parse("""{"version":"1.0","deleteSurface":{"surfaceId":"s"}}"""));
+        host.Load("""[{"id":"root","component":"Text","text":"Second"}]""");
+
+        // Assert
+        surface.WaitForAssertion(() => surface.Find(".a2ui-text").TextContent.ShouldBe("Second"));
+        surface.Instance.Dispose();
+        Action late = () => host.Processor.ProcessOrThrow(JsonNode.Parse("""{"version":"1.0","deleteSurface":{"surfaceId":"s"}}"""));
+        late.ShouldNotThrow();
+    }
+
+    /// <summary>
     /// Proves that absent layout options render the catalog defaults (<c>justify: start</c>, <c>align: stretch</c>,
     /// <c>direction: vertical</c>, <c>variant: body</c>), since the core keeps properties as the agent sent them.
     /// </summary>

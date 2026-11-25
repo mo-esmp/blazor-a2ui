@@ -96,6 +96,33 @@ public abstract class A2UIComponentBase : ComponentBase
         Surface.ResolveChildren(Component, name, Context);
 
     /// <summary>
+    /// The children of a container property with a stable render key each, so Blazor keeps a child's state with
+    /// the child when the agent reorders siblings. The key is the child's id and data scope (template items share an
+    /// id); a repeated id in a malformed list gets its position added, since duplicate keys would fail the render.
+    /// </summary>
+    /// <param name="name">The property holding a list of ids or a template.</param>
+    protected List<(ComponentInstance Component, EvaluationContext Context, string Key)> KeyedChildren(string name)
+    {
+        IReadOnlyList<(ComponentInstance Component, EvaluationContext Context)> children = Children(name);
+        List<(ComponentInstance, EvaluationContext, string)> keyed = new(children.Count);
+        HashSet<string> used = new(StringComparer.Ordinal);
+        for (int i = 0; i < children.Count; i++)
+        {
+            (ComponentInstance child, EvaluationContext context) = children[i];
+            string key = string.Concat(child.Id, "@", context.Path);
+            if (!used.Add(key))
+            {
+                key = string.Concat(key, "#", i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                used.Add(key);
+            }
+
+            keyed.Add((child, context, key));
+        }
+
+        return keyed;
+    }
+
+    /// <summary>
     /// The component's <c>@checks</c> result in the current data.
     /// </summary>
     protected CheckOutcome Checks() => Surface.EvaluateChecks(Component, Context);
@@ -148,9 +175,15 @@ public abstract class A2UIComponentBase : ComponentBase
     /// </summary>
     protected async Task RunActionAsync()
     {
-        if (await Surface.DispatchActionAsync(Component, Context) && Host is not null)
+        // Captured before the await: a streamed update can replace this component's parameters while an agent
+        // call in the action is pending, and the notification must name the source the user acted on.
+        Surface surface = Surface;
+        ComponentInstance component = Component;
+        EvaluationContext context = Context;
+        A2UISurface? host = Host;
+        if (await surface.DispatchActionAsync(component, context) && host is not null)
         {
-            await Host.NotifyActionAsync(Component, Context);
+            await host.NotifyActionAsync(new A2UIActionEventArgs(surface.SurfaceId, component.Id, context));
         }
     }
 }
