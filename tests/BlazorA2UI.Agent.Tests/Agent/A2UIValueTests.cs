@@ -81,6 +81,25 @@ public sealed class A2UIValueTests
     }
 
     /// <summary>
+    /// Proves that a reserved key is rejected at any depth of a literal, inside objects and arrays.
+    /// </summary>
+    [Theory]
+    [InlineData("""{"nested":{"@path":"/secret"}}""")]
+    [InlineData("""[1,{"@call":"openUrl"}]""")]
+    [InlineData("""{"list":[{"ok":{"@":"x"}}]}""")]
+    public void Literal_NestedReservedKey_Throws(string json)
+    {
+        // Arrange
+        JsonNode? literal = JsonNode.Parse(json);
+
+        // Act
+        Action create = () => A2UIValue.Literal(literal);
+
+        // Assert
+        create.ShouldThrow<ArgumentException>();
+    }
+
+    /// <summary>
     /// Proves that a literal is copied, so later changes to the source do not reach the message.
     /// </summary>
     [Fact]

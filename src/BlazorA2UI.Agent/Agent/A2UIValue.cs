@@ -28,25 +28,16 @@ public sealed class A2UIValue
     public A2UIValueKind Kind { get; }
 
     /// <summary>
-    /// Creates a literal value. A literal object must not use a key that starts with a single <c>@</c>, because the
-    /// renderer would read it as a binding, a call or another reserved key.
+    /// Creates a literal value. No object in the literal, at any depth, may use a key that starts with a single
+    /// <c>@</c>, because the renderer would read it as a binding, a call or another reserved key. Escape a literal
+    /// <c>@</c> key by doubling it (<c>@@handle</c>).
     /// </summary>
-    /// <exception cref="ArgumentException">An object in the literal has a reserved key.</exception>
+    /// <exception cref="ArgumentException">An object in the literal has a reserved key, or the literal is nested too deeply.</exception>
     /// <param name="value">The literal; it is copied.</param>
     public static A2UIValue Literal(JsonNode? value)
     {
         JsonNode? copy = value?.DeepClone();
-        if (copy is JsonObject obj)
-        {
-            foreach ((string key, JsonNode? _) in obj)
-            {
-                if (IsReservedKey(key))
-                {
-                    throw new ArgumentException($"A literal object cannot use the reserved key '{key}'.", nameof(value));
-                }
-            }
-        }
-
+        CheckLiteral(copy, 0);
         return new A2UIValue(copy, A2UIValueKind.Literal);
     }
 
@@ -126,6 +117,48 @@ public sealed class A2UIValue
     /// </summary>
     /// <param name="node">The wire form, owned by the new value.</param>
     internal static A2UIValue FromWire(JsonNode node) => new(node, A2UIValueKind.Literal);
+
+    /// <summary>
+    /// The deepest literal accepted. It matches the renderer's evaluation limit.
+    /// </summary>
+    internal const int MaxLiteralDepth = 64;
+
+    /// <summary>
+    /// Rejects a reserved key anywhere in a literal.
+    /// </summary>
+    /// <exception cref="ArgumentException">An object has a reserved key, or the literal is nested too deeply.</exception>
+    /// <param name="node">The part of the literal to check.</param>
+    /// <param name="depth">The nesting depth of <paramref name="node"/>.</param>
+    private static void CheckLiteral(JsonNode? node, int depth)
+    {
+        if (depth > MaxLiteralDepth)
+        {
+            throw new ArgumentException($"A literal cannot be nested more than {MaxLiteralDepth} levels deep.", "value");
+        }
+
+        switch (node)
+        {
+            case JsonObject obj:
+                foreach ((string key, JsonNode? child) in obj)
+                {
+                    if (IsReservedKey(key))
+                    {
+                        throw new ArgumentException($"A literal object cannot use the reserved key '{key}'.", "value");
+                    }
+
+                    CheckLiteral(child, depth + 1);
+                }
+
+                break;
+            case JsonArray array:
+                foreach (JsonNode? item in array)
+                {
+                    CheckLiteral(item, depth + 1);
+                }
+
+                break;
+        }
+    }
 
     /// <summary>
     /// Whether a key is reserved: it starts with <c>@</c> and is not escaped as <c>@@</c>.

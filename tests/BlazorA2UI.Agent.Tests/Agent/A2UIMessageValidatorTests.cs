@@ -1,4 +1,5 @@
 ﻿using BlazorA2UI.Catalogs;
+using BlazorA2UI.Evaluation;
 using BlazorA2UI.Processing;
 
 namespace BlazorA2UI.Tests.Agent;
@@ -164,37 +165,97 @@ public sealed class A2UIMessageValidatorTests
     }
 
     /// <summary>
-    /// Proves that a <c>callRendererFunction</c> envelope is checked against the catalog but its function never runs,
-    /// and that a call to a function the agent may not call is reported.
+    /// Proves that a valid <c>callRendererFunction</c> passes without its function running.
     /// </summary>
     [Fact]
     public void Validate_CallRendererFunction_ChecksWithoutRunning()
     {
         // Arrange
         int runs = 0;
-        FunctionDefinition echo = new FunctionDefinition("echo") { AllowedCallers = AllowedCallers.RendererOrAgent }
-            .WithImplementation(_ =>
-            {
-                runs++;
-                return ValueTask.FromResult<JsonNode?>(null);
-            });
-        using A2UIMessageValidator validator = new([BasicCatalog.Create(), new Catalog("urn:tools", [], [echo], A2UIProtocol.Version)]);
-        JsonObject call = JsonNode.Parse("""
-            {"version":"1.0","callRendererFunction":{"functionCallId":"c1","callFunction":{"@call":"echo","catalogId":"urn:tools"}}}
-            """)!.AsObject();
-        JsonObject rendererOnly = JsonNode.Parse("""
-            {"version":"1.0","callRendererFunction":{"functionCallId":"c2","callFunction":{"@call":"formatString","args":{"value":"x"}}}}
-            """)!.AsObject();
+        using A2UIMessageValidator validator = ToolsValidator(() => runs++);
 
         // Act
-        A2UIValidationResult valid = validator.Validate(call);
-        A2UIValidationResult invalid = validator.Validate(rendererOnly);
+        A2UIValidationResult result = validator.Validate(RendererCall("""{"@call":"echo","catalogId":"urn:tools","args":{"value":"x"}}"""));
 
         // Assert
-        valid.Errors.ShouldBeEmpty();
-        invalid.IsValid.ShouldBeFalse();
+        result.Errors.ShouldBeEmpty();
         runs.ShouldBe(0);
     }
+
+    /// <summary>
+    /// Proves that a <c>callRendererFunction</c> the renderer would refuse is reported, without running anything:
+    /// an unknown catalog or function, a renderer-only function, a function that needs user activation, arguments
+    /// that do not match the schema, a renderer-only call nested in the arguments, and an unknown surface.
+    /// </summary>
+    [Theory]
+    [InlineData("""{"@call":"echo","catalogId":"urn:missing","args":{"value":"x"}}""")]
+    [InlineData("""{"@call":"missing","catalogId":"urn:tools"}""")]
+    [InlineData("""{"@call":"formatString","catalogId":"https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json","args":{"value":"x"}}""")]
+    [InlineData("""{"@call":"gesture","catalogId":"urn:tools"}""")]
+    [InlineData("""{"@call":"echo","catalogId":"urn:tools","args":{"value":5}}""")]
+    [InlineData("""{"@call":"echo","catalogId":"urn:tools"}""")]
+    [InlineData("""{"@call":"echo","catalogId":"urn:tools","args":{"value":{"@call":"secret","catalogId":"urn:tools"}}}""")]
+    public void Validate_CallRendererFunctionRefused_ReportsInvalidFunctionCall(string callFunction)
+    {
+        // Arrange
+        int runs = 0;
+        using A2UIMessageValidator validator = ToolsValidator(() => runs++);
+
+        // Act
+        A2UIValidationResult result = validator.Validate(RendererCall(callFunction));
+
+        // Assert
+        result.Errors.ShouldHaveSingleItem().Code.ShouldBe(A2UIErrorCodes.InvalidFunctionCall);
+        runs.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// Proves that a <c>callRendererFunction</c> on a surface the mirror does not hold is reported.
+    /// </summary>
+    [Fact]
+    public void Validate_CallRendererFunctionUnknownSurface_ReportsInvalidFunctionCall()
+    {
+        // Arrange
+        using A2UIMessageValidator validator = ToolsValidator(() => { });
+        JsonObject message = RendererCall("""{"@call":"echo","catalogId":"urn:tools","args":{"value":"x"}}""");
+        message["callRendererFunction"]!["surfaceId"] = "missing";
+
+        // Act
+        A2UIValidationResult result = validator.Validate(message);
+
+        // Assert
+        result.Errors.ShouldHaveSingleItem().Code.ShouldBe(A2UIErrorCodes.InvalidFunctionCall);
+    }
+
+    /// <summary>
+    /// Creates a validator with the basic catalog and a tools catalog: <c>echo</c> (agent-callable, takes a string
+    /// <c>value</c>), <c>gesture</c> (needs user activation) and <c>secret</c> (renderer-only).
+    /// </summary>
+    /// <param name="onRun">Called whenever any tools function runs.</param>
+    private static A2UIMessageValidator ToolsValidator(Action onRun)
+    {
+        ValueTask<JsonNode?> Run(FunctionInvocation invocation)
+        {
+            onRun();
+            return ValueTask.FromResult<JsonNode?>(null);
+        }
+
+        JsonObject schema = JsonNode.Parse("""{"type":"object","properties":{"value":{"type":"string"}},"required":["value"]}""")!.AsObject();
+        FunctionDefinition[] functions =
+        [
+            new FunctionDefinition("echo") { AllowedCallers = AllowedCallers.RendererOrAgent, ArgsSchema = schema }.WithImplementation(Run),
+            new FunctionDefinition("gesture") { AllowedCallers = AllowedCallers.RendererOrAgent, RequiresUserActivation = true }.WithImplementation(Run),
+            new FunctionDefinition("secret").WithImplementation(Run),
+        ];
+        return new A2UIMessageValidator([BasicCatalog.Create(), new Catalog("urn:tools", [], functions, A2UIProtocol.Version)]);
+    }
+
+    /// <summary>
+    /// Builds a <c>callRendererFunction</c> message.
+    /// </summary>
+    /// <param name="callFunction">The <c>callFunction</c> object, as JSON.</param>
+    private static JsonObject RendererCall(string callFunction) =>
+        JsonNode.Parse($$$"""{"version":"1.0","callRendererFunction":{"functionCallId":"c1","callFunction":{{{callFunction}}}}}""")!.AsObject();
 
     /// <summary>
     /// Proves that a line that is not JSON is reported rather than thrown.

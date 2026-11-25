@@ -151,6 +151,29 @@ public sealed class A2UIMessagesTests
     }
 
     /// <summary>
+    /// Proves that a reference to a component the same message writes is refused, because it can close a cycle such
+    /// as a root that references itself, while a reference to a component outside the message is kept.
+    /// </summary>
+    [Fact]
+    public void UpdateComponents_ReferenceToOwnComponent_Throws()
+    {
+        // Arrange
+        Column selfReferencing = new() { Children = [A2UIComponent.Ref("root")] };
+        Column generatedTarget = new() { Children = [new Text { Content = "a" }, A2UIComponent.Ref("root__text_1")] };
+        Card partial = new() { Id = "card", Child = A2UIComponent.Ref("header") };
+
+        // Act
+        Action toRoot = () => A2UIMessages.UpdateComponents("main", selfReferencing);
+        Action toGenerated = () => A2UIMessages.UpdateComponents("main", generatedTarget);
+        JsonArray components = Components(A2UIMessages.UpdateComponents("main", [partial]));
+
+        // Assert
+        toRoot.ShouldThrow<InvalidOperationException>();
+        toGenerated.ShouldThrow<InvalidOperationException>();
+        components.ShouldHaveSingleItem()!["child"]!.GetValue<string>().ShouldBe("header");
+    }
+
+    /// <summary>
     /// Proves that a tree deeper than the renderer accepts is refused.
     /// </summary>
     [Fact]

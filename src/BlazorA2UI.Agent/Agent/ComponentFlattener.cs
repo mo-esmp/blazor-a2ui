@@ -61,6 +61,11 @@ internal sealed class ComponentFlattener
     private readonly Dictionary<string, A2UIComponent> _owners = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// The ids that references in the trees point to.
+    /// </summary>
+    private readonly List<string> _references = [];
+
+    /// <summary>
     /// The next counter for each generated id stem.
     /// </summary>
     private readonly Dictionary<string, int> _counters = new(StringComparer.Ordinal);
@@ -112,6 +117,7 @@ internal sealed class ComponentFlattener
         }
 
         tree.AssignIds();
+        tree.CheckReferences();
         JsonArray output = [];
         foreach (A2UIComponent component in tree._postOrder)
         {
@@ -148,8 +154,10 @@ internal sealed class ComponentFlattener
     /// <param name="depth">Its depth below the top-level component.</param>
     private void Collect(A2UIComponent component, string? prefix, int depth)
     {
-        if (component is A2UIComponentRef)
+        if (component is A2UIComponentRef reference)
         {
+            // A reference always has the id it was created with.
+            _references.Add(reference.Id!);
             return;
         }
 
@@ -219,6 +227,24 @@ internal sealed class ComponentFlattener
 
         _owners[id] = component;
         _ids[component] = id;
+    }
+
+    /// <summary>
+    /// Rejects a reference to a component this flatten writes. Such a reference can close a cycle (a root that
+    /// references <c>root</c>), and the component object itself can be placed instead. References to components already
+    /// on the surface are left for the renderer or <see cref="A2UIMessageValidator"/> to check.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A reference points to a component in the trees being flattened.</exception>
+    private void CheckReferences()
+    {
+        foreach (string id in _references)
+        {
+            if (_owners.ContainsKey(id))
+            {
+                throw new InvalidOperationException(
+                    $"A reference points to '{id}', which this message writes. Place the component itself instead of a reference.");
+            }
+        }
     }
 
     /// <summary>

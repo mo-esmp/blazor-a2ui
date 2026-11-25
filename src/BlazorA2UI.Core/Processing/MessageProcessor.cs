@@ -615,6 +615,10 @@ public sealed class MessageProcessor : IDisposable
                 {
                     Track(HandleCallRendererFunctionAsync(body, state.UserActivated));
                 }
+                else
+                {
+                    CheckCallRendererFunction(body, state.UserActivated);
+                }
 
                 break;
             case "agentFunctionResponse":
@@ -1244,6 +1248,34 @@ public sealed class MessageProcessor : IDisposable
         {
             throw Invalid("callFunction 'args' must be an object.");
         }
+    }
+
+    /// <summary>
+    /// Checks a <c>callRendererFunction</c> as far as running it would, without running it: the surface must exist and
+    /// the call must pass <see cref="A2UIEvaluator.CheckAgentCall"/>. Used when <see cref="RunsRendererFunctions"/> is off.
+    /// </summary>
+    /// <param name="body">The <c>callRendererFunction</c> body, already checked by <see cref="ValidateCallRendererFunction"/>.</param>
+    /// <param name="userActivated">Whether the message was processed inside a user gesture.</param>
+    /// <exception cref="A2UIException">Running the call would fail before the function runs.</exception>
+    private void CheckCallRendererFunction(JsonObject body, bool userActivated)
+    {
+        EvaluationContext context = EvaluationContext.Detached();
+        if (body.ContainsKey("surfaceId"))
+        {
+            string? surfaceId = A2UIValues.AsString(body["surfaceId"]);
+            if (surfaceId is null || !_surfaces.TryGetValue(surfaceId, out Surface? surface))
+            {
+                throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Surface '{surfaceId}' does not exist.")
+                {
+                    FunctionCallId = A2UIValues.AsString(body["functionCallId"]),
+                };
+            }
+
+            context = surface.RootContext;
+        }
+
+        // ValidateCallRendererFunction already required callFunction to be an object.
+        Evaluator.CheckAgentCall((JsonObject)body["callFunction"]!, context, new EvaluationScope(EvaluationMode.AgentCall) { UserActivationOverride = userActivated });
     }
 
     /// <summary>

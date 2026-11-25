@@ -403,6 +403,117 @@ public sealed class A2UIEvaluator
         context.Surface is { } surface ? surface.TryGetCatalog(catalogId, out catalog) : Catalogs.TryGet(catalogId, out catalog);
 
     /// <summary>
+    /// Checks an agent's <c>callRendererFunction</c> call the way running it would, without running or evaluating
+    /// anything: the catalog must be visible and target this protocol version, the function must be local, callable by
+    /// an agent and allowed without user activation, static nested calls must pass the same checks, and arguments that
+    /// hold no binding or call must match the function's argument schema. The agent-side validator uses this in place
+    /// of running the call.
+    /// </summary>
+    /// <param name="call">The <c>callFunction</c> object.</param>
+    /// <param name="context">The context the call would run in.</param>
+    /// <param name="scope">An <see cref="EvaluationMode.AgentCall"/> scope.</param>
+    /// <exception cref="A2UIException">The call would fail with <see cref="A2UIErrorCodes.InvalidFunctionCall"/> before running.</exception>
+    internal void CheckAgentCall(JsonObject call, EvaluationContext context, EvaluationScope scope)
+    {
+        foreach ((string key, JsonNode? _) in call)
+        {
+            if (key is not ("@call" or "catalogId" or "args"))
+            {
+                throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Unexpected key '{key}' in a function call.");
+            }
+        }
+
+        string name = A2UIValues.AsString(call["@call"]) is { Length: > 0 } callName
+            ? callName
+            : throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, "'@call' must be a non-empty string.");
+        if (name.StartsWith('@'))
+        {
+            return; // System functions such as @index have no catalog entry; evaluating them is the only check.
+        }
+
+        string catalogId = A2UIValues.AsString(call["catalogId"]) is { Length: > 0 } id
+            ? id
+            : throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"The call to '{name}' needs a non-empty string catalogId.");
+        if (!TryGetCatalog(context, catalogId, out Catalog? catalog) || catalog.ProtocolVersion != A2UIProtocol.Version)
+        {
+            throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Catalog not found: {catalogId}");
+        }
+
+        catalog.Functions.TryGetValue(name, out FunctionDefinition? definition);
+        CheckBoundaries(name, definition, scope);
+        JsonObject? rawArgs = call["args"] switch
+        {
+            null => null,
+            JsonObject obj => obj,
+            _ => throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"The args of '{name}' must be an object."),
+        };
+        if (rawArgs is not null)
+        {
+            PreflightNestedCalls(rawArgs, catalog, context, scope, inTemplate: false, 0);
+        }
+
+        // The definition is not null here: CheckBoundaries rejects an unknown function in an agent call.
+        if (definition!.ArgsSchema is not { } schema || (rawArgs is not null && IsDynamic(rawArgs, 0)))
+        {
+            return;
+        }
+
+        JsonObject args = new();
+        if (rawArgs is not null)
+        {
+            foreach ((string key, JsonNode? value) in rawArgs)
+            {
+                args[UnescapeKey(key)] = value?.DeepClone();
+            }
+        }
+
+        ArgsSchema.ApplyDefaultsAndCoerce(schema, args);
+        if (ArgsSchema.Validate(schema, args) is { } problem)
+        {
+            throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Invalid arguments for function '{name}': {problem}");
+        }
+    }
+
+    /// <summary>
+    /// Whether a value holds a binding, a call or another reserved key anywhere, so its arguments are known only after evaluation.
+    /// </summary>
+    /// <param name="node">The value.</param>
+    /// <param name="depth">The nesting depth; past <see cref="MaxDepth"/> the value counts as dynamic.</param>
+    private static bool IsDynamic(JsonNode? node, int depth)
+    {
+        if (depth > MaxDepth)
+        {
+            return true;
+        }
+
+        switch (node)
+        {
+            case JsonObject obj:
+                foreach ((string key, JsonNode? child) in obj)
+                {
+                    if ((key.Length > 0 && key[0] == '@' && (key.Length == 1 || key[1] != '@')) || IsDynamic(child, depth + 1))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            case JsonArray arr:
+                foreach (JsonNode? item in arr)
+                {
+                    if (IsDynamic(item, depth + 1))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
     /// Checks the calls in a parsed <c>${...}</c> template before any part of it is evaluated, when the template is
     /// evaluated for an agent's <c>callRendererFunction</c>. A call that crosses a boundary then fails without side
     /// effects and takes priority over other errors in the same template; a function that cannot be resolved is left
