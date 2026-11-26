@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+    - name: Report a security vulnerability
+      url: https://github.com/mo-esmp/blazor-a2ui/security/advisories/new
+      about: Please report security problems privately, not in a public issue.
+    - name: A2UI specification
+      url: https://a2ui.org
+      about: Questions about the protocol itself belong to the A2UI project.

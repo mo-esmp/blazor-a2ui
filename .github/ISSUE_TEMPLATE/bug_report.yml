@@ -1,0 +1,87 @@
+name: Bug report
+description: Report something in BlazorA2UI that doesn't work as it should.
+labels: ["bug"]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              Thanks for taking the time to report a bug. If it is a security problem, don't open an issue: follow [SECURITY.md](https://github.com/mo-esmp/blazor-a2ui/blob/main/SECURITY.md) instead.
+    - type: textarea
+      id: description
+      attributes:
+          label: Describe the bug
+          description: What happened?
+      validations:
+          required: true
+    - type: textarea
+      id: reproduce
+      attributes:
+          label: Steps to reproduce
+          description: The smallest steps that show the bug.
+          placeholder: |
+              1. Register ...
+              2. Send the messages below ...
+              3. Click ...
+      validations:
+          required: true
+    - type: textarea
+      id: messages
+      attributes:
+          label: A2UI messages
+          description: The JSONL messages the agent sent, trimmed to what reproduces the bug. Remove anything private.
+          render: json
+    - type: textarea
+      id: expected
+      attributes:
+          label: Expected behavior
+          description: What you expected to happen instead.
+      validations:
+          required: true
+    - type: dropdown
+      id: package
+      attributes:
+          label: Package
+          multiple: true
+          options:
+              - BlazorA2UI.Core
+              - BlazorA2UI
+              - BlazorA2UI.Agent
+              - Not sure
+      validations:
+          required: true
+    - type: input
+      id: version
+      attributes:
+          label: Package version
+          placeholder: 0.1.0-preview
+      validations:
+          required: true
+    - type: input
+      id: dotnet
+      attributes:
+          label: .NET version
+          placeholder: "10.0.100"
+      validations:
+          required: true
+    - type: dropdown
+      id: hosting
+      attributes:
+          label: Blazor render mode
+          options:
+              - Interactive Server
+              - Interactive WebAssembly
+              - Interactive Auto
+              - Static server rendering
+              - Not Blazor (core or agent package only)
+      validations:
+          required: true
+    - type: input
+      id: browser
+      attributes:
+          label: Browser
+          placeholder: Chrome 131, Firefox 133, Safari 18, ...
+    - type: textarea
+      id: context
+      attributes:
+          label: Additional context
+          description: Error reports (`ErrorReported`), stack traces, screenshots or anything else that helps.
