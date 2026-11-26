@@ -11,10 +11,14 @@
   below.
 * `src/BlazorA2UI.Agent` (package `BlazorA2UI.Agent`) is for the agent side: component and message builders, a JSONL
   writer, a validator, the LLM prompt builder and response parsers, the processor for messages from the renderer
-  (actions, errors, agent functions) and renderer function calls. It depends on nothing but the core. The ASP.NET Core streaming endpoint goes in a separate
-  package, `BlazorA2UI.Agent.AspNetCore`.
-* `tests/BlazorA2UI.Core.Tests` holds the unit tests and the conformance tests. `tests/BlazorA2UI.Tests` and
-  `tests/BlazorA2UI.Agent.Tests` test the components and the agent side.
+  (actions, errors, agent functions) and renderer function calls. It depends on nothing but the core.
+* `src/BlazorA2UI.Agent.AspNetCore` (package `BlazorA2UI.Agent.AspNetCore`) maps the agent's HTTP endpoint: it reads the
+  client's request, answers the renderer's messages, runs the turn and streams the answer as JSON Lines or server-sent
+  events, keeping each conversation's surfaces and pending renderer calls. It adds only the ASP.NET Core shared
+  framework.
+* `tests/BlazorA2UI.Core.Tests` holds the unit tests and the conformance tests. `tests/BlazorA2UI.Tests`,
+  `tests/BlazorA2UI.Agent.Tests` and `tests/BlazorA2UI.Agent.AspNetCore.Tests` test the components, the agent side and
+  the endpoint. The endpoint tests run Kestrel on a free local port, so they need no test-host package.
 
 ## Safety
 

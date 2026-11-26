@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="BlazorA2UI.Agent.Tests" />
+    <InternalsVisibleTo Include="BlazorA2UI.Agent.AspNetCore" />
   </ItemGroup>
 
   <ItemGroup>

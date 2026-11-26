@@ -9,8 +9,9 @@ keeps a data model, and sends the user's actions back.
 > **Status: preview.** The protocol core (`BlazorA2UI.Core`) passes Google's conformance
 > suites, and the Razor components (`BlazorA2UI`) render the whole basic catalog. The agent side
 > (`BlazorA2UI.Agent`) has its builders, validator, LLM prompts and response parsing, and the
-> messages that flow back from the renderer; the streaming endpoint is in progress. Names may
-> still change before the first release.
+> messages that flow back from the renderer, and `BlazorA2UI.Agent.AspNetCore` serves an agent
+> over HTTP; the renderer-side client and the samples are in progress. Names may still change
+> before the first release.
 >
 > | Part | Package | State |
 > | --- | --- | --- |
@@ -19,7 +20,8 @@ keeps a data model, and sends the user's actions back.
 > | Agent side: component and message builders, a JSONL writer, a validator that mirrors the renderer | `BlazorA2UI.Agent` | Done |
 > | Agent side: messages from the renderer, agent functions, renderer function calls | `BlazorA2UI.Agent` | Done |
 > | Agent side: LLM prompts and response parsing | `BlazorA2UI.Agent` | Done |
-> | Streaming endpoint for ASP.NET Core, and sample apps | `BlazorA2UI.Agent.AspNetCore` | Planned |
+> | Streaming endpoint for ASP.NET Core | `BlazorA2UI.Agent.AspNetCore` | Done |
+> | Renderer-side client for the endpoint, and sample apps | `BlazorA2UI`, `samples/` | Planned |
 
 ## Safety rules
 
@@ -162,7 +164,8 @@ the agent endpoint must allow your app's origin (CORS).
 | `tests/BlazorA2UI.Tests` | | bUnit tests for the components and the rendering safety rules. |
 | `src/BlazorA2UI.Agent` | `BlazorA2UI.Agent` | Agent-side builders, writer, validator, LLM prompts and response parsing, and handling of the renderer's messages. No dependency beyond the core. |
 | `tests/BlazorA2UI.Agent.Tests` | | Tests for the agent side, including a strict check of every basic component and round trips against the renderer core. |
-| `src/BlazorA2UI.Agent.AspNetCore` | `BlazorA2UI.Agent.AspNetCore` | Streaming endpoint for ASP.NET Core. Planned. |
+| `src/BlazorA2UI.Agent.AspNetCore` | `BlazorA2UI.Agent.AspNetCore` | The streaming endpoint for ASP.NET Core. |
+| `tests/BlazorA2UI.Agent.AspNetCore.Tests` | | Tests for the endpoint over real HTTP. |
 | `samples/` | | Blazor Server and WebAssembly sample apps and a sample agent. Planned. |
 
 ## Building UI on the agent side
@@ -335,6 +338,61 @@ A2UIRendererFunctionCall pending = rendererCalls.Call(call, surfaceId: "main");
 await SendToRendererAsync(pending.Message);
 JsonNode? location = await pending.Result; // throws A2UIException on an error, a timeout or cancellation
 ```
+
+## Serving an agent over HTTP
+
+`BlazorA2UI.Agent.AspNetCore` maps one `POST` endpoint that runs the agent's turns and streams
+their messages back:
+
+```csharp
+using BlazorA2UI.Agent.AspNetCore;
+
+app.MapA2UIAgent("/a2ui", async (turn, cancellationToken) =>
+{
+    // turn.Text is the user's text; turn.Actions and turn.Errors come from the renderer.
+    IAsyncEnumerable<string> answer = model.StreamAsync(systemPrompt, turn.Text, cancellationToken);
+    IReadOnlyList<A2UIErrorPart> problems = await turn.SendModelResponseAsync(answer, cancellationToken: cancellationToken);
+    // problems holds what was not sent, written so it can go back to the model.
+}, options =>
+{
+    options.Catalogs.Add(BasicCatalog.Create());
+    options.AgentFunctions = functions; // optional
+}).RequireAuthorization();
+```
+
+**The request** is `application/json`. Every part is optional, but a request holds text or
+messages:
+
+```json
+{ "text": "Book a table for two", "messages": [ /* action, callAgentFunction, rendererFunctionResponse, error */ ], "metadata": { } }
+```
+
+**The response** streams the agent's messages as JSON Lines (`application/jsonl`), one message per
+line, each flushed as soon as it is ready. A client that sends `Accept: text/event-stream` gets
+server-sent events instead: `a2ui` events with messages, `text` events with the model's text, and
+an `error` event if the turn fails. The turn ends when the response ends.
+
+- **Conversations.** The first response carries a new id in the `A2UI-Conversation` header. Send it
+  back with each later request. The server keeps the conversation's surfaces, so every message is
+  checked the way the renderer will check it, and its pending renderer function calls. Idle
+  conversations expire after `ConversationIdleTimeout` (30 minutes). An unknown or expired id gets
+  404, and a full store (`MaxConversations`, 10,000) gets 503.
+- **Renderer messages.** `callAgentFunction` is answered on the response without a turn, and
+  `rendererFunctionResponse` settles the call it answers. `action` and `error` start a turn, as
+  text does. A second turn while one is running in the same conversation gets 409.
+- **Calling the renderer.** `turn.CallRendererFunctionAsync` sends `callRendererFunction` and
+  waits. The client answers with `rendererFunctionResponse` in another request of the same
+  conversation, while the first response is still streaming.
+- **Checked before sending.** `SendAsync` throws `A2UIValidationException` for a message the
+  renderer would reject, and `SendModelResponseAsync` holds such messages back and returns them as
+  problems. Only the four UI messages can be sent this way.
+- **Failures.** An exception in the turn is logged. The client gets an `error` event with a generic
+  message over server-sent events, or an aborted connection over JSON Lines, so a cut-off answer
+  never looks complete. Exception details never reach the client.
+- **Bounded.** The body is at most `MaxRequestBodySize` (1 MiB) and `MaxMessagesPerRequest` (100)
+  messages, with duplicate keys, deep nesting and invalid Unicode refused with 400.
+- **Browsers on another origin** need a CORS policy that allows the app's origin and exposes the
+  `A2UI-Conversation` header: `policy.WithOrigins("https://my-app").AllowAnyHeader().WithMethods("POST").WithExposedHeaders("A2UI-Conversation")`.
 
 ## Using the core directly (available now)
 
