@@ -4,12 +4,12 @@
 /// Turns component trees into the wire format: a flat list where parents reference children by id.
 /// </summary>
 /// <remarks>
-/// Ids are assigned in two passes, so an id the agent chose is never handed out to another component. The first pass
-/// collects every component and reserves the chosen ids. The second gives each remaining component an id made from
-/// the nearest ancestor that has a chosen id, its type and a counter: <c>card__text_1</c>. A later update of
-/// <c>card</c> therefore generates the same ids again and replaces those components, and leaves the rest of the
-/// surface alone. Children are written before their parents, so every reference points to a component that came
-/// earlier in the list.
+/// Ids are assigned in two passes. The first collects every component and reserves the ids the agent chose. The second
+/// gives each remaining component an id made from the nearest ancestor that has a chosen id, its type and a counter:
+/// <c>card__text_1</c>. A later update of <c>card</c> therefore generates the same ids again and replaces those
+/// components, and leaves the rest of the surface alone. Generated ids always contain <see cref="Separator"/> and
+/// chosen ids never may, so the two can never collide, in this message or in any later one. Children are written
+/// before their parents, so every reference points to a component that came earlier in the list.
 /// </remarks>
 internal sealed class ComponentFlattener
 {
@@ -24,6 +24,11 @@ internal sealed class ComponentFlattener
     /// <see cref="Processing.A2UIProcessorOptions.MaxComponentsPerSurface"/>.
     /// </summary>
     internal const int MaxComponents = 5_000;
+
+    /// <summary>
+    /// The separator between the ancestor id and the type in a generated id. Chosen ids may not contain it.
+    /// </summary>
+    internal const string Separator = "__";
 
     /// <summary>
     /// Every collected component, in the order it was first reached.
@@ -44,6 +49,12 @@ internal sealed class ComponentFlattener
     /// The id prefix each component without a chosen id inherits: the nearest chosen id above it.
     /// </summary>
     private readonly Dictionary<A2UIComponent, string?> _prefixes = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// How far below each collected component its deepest descendant is, to check the depth limit on every path to a
+    /// shared component.
+    /// </summary>
+    private readonly Dictionary<A2UIComponent, int> _heights = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
     /// The components on the current collection path, to find cycles.
@@ -82,7 +93,8 @@ internal sealed class ComponentFlattener
     /// </summary>
     /// <exception cref="ArgumentException">A top-level component is a reference, has no id where one is required, or has the wrong id.</exception>
     /// <exception cref="InvalidOperationException">
-    /// Two components share an id, a component contains itself, or the tree is deeper or larger than the renderer accepts.
+    /// Two components share an id, a chosen id contains <see cref="Separator"/>, a component contains itself, a
+    /// reference points to a component in the trees, or the tree is deeper or larger than the renderer accepts.
     /// </exception>
     /// <param name="tops">The top-level components.</param>
     /// <param name="rootId">The id the single top-level component must have (<c>root</c>), or null when each top-level component must name its own id.</param>
@@ -149,16 +161,17 @@ internal sealed class ComponentFlattener
     /// Collects a component and, depth first, its children.
     /// </summary>
     /// <exception cref="InvalidOperationException">The tree has a cycle, is too deep, is too large, or repeats an id.</exception>
+    /// <returns>How far below the component its deepest descendant is: 0 for a leaf.</returns>
     /// <param name="component">The component.</param>
     /// <param name="prefix">The nearest chosen id above it.</param>
     /// <param name="depth">Its depth below the top-level component.</param>
-    private void Collect(A2UIComponent component, string? prefix, int depth)
+    private int Collect(A2UIComponent component, string? prefix, int depth)
     {
         if (component is A2UIComponentRef reference)
         {
             // A reference always has the id it was created with.
             _references.Add(reference.Id!);
-            return;
+            return 0;
         }
 
         if (_visiting.Contains(component))
@@ -166,15 +179,15 @@ internal sealed class ComponentFlattener
             throw new InvalidOperationException($"A {component.ComponentName} component contains itself.");
         }
 
-        if (_collected.Contains(component))
+        if (_heights.TryGetValue(component, out int collectedHeight))
         {
-            return; // A component used twice is written once, and both parents reference it.
+            // A component used twice is written once, and both parents reference it. Its subtree hangs below this
+            // parent too, so the depth limit applies along this path as well.
+            CheckDepth(depth + collectedHeight);
+            return collectedHeight;
         }
 
-        if (depth > MaxDepth)
-        {
-            throw new InvalidOperationException($"The component tree is deeper than {MaxDepth} levels.");
-        }
+        CheckDepth(depth);
 
         if (_collected.Count >= MaxComponents)
         {
@@ -198,23 +211,45 @@ internal sealed class ComponentFlattener
         _prefixes[component] = prefix;
         _preOrder.Add(component);
         _visiting.Add(component);
+        int height = 0;
         foreach (A2UIComponent child in collector.Found)
         {
-            Collect(child, ownId ?? prefix, depth + 1);
+            height = Math.Max(height, Collect(child, ownId ?? prefix, depth + 1) + 1);
         }
 
         _visiting.Remove(component);
         _postOrder.Add(component);
+        _heights[component] = height;
+        return height;
+    }
+
+    /// <summary>
+    /// Rejects a component placed deeper than the renderer accepts.
+    /// </summary>
+    /// <exception cref="InvalidOperationException"><paramref name="depth"/> is over <see cref="MaxDepth"/>.</exception>
+    /// <param name="depth">The depth below the top-level component.</param>
+    private static void CheckDepth(int depth)
+    {
+        if (depth > MaxDepth)
+        {
+            throw new InvalidOperationException($"The component tree is deeper than {MaxDepth} levels.");
+        }
     }
 
     /// <summary>
     /// Gives a component a chosen id.
     /// </summary>
-    /// <exception cref="InvalidOperationException">Another component already has the id.</exception>
+    /// <exception cref="InvalidOperationException">Another component already has the id, or the id contains <see cref="Separator"/>.</exception>
     /// <param name="component">The component.</param>
     /// <param name="id">The id.</param>
     private void Reserve(A2UIComponent component, string id)
     {
+        if (id.Contains(Separator, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"The id '{id}' contains '{Separator}', which only generated ids use. Choose an id without it.");
+        }
+
         if (_owners.TryGetValue(id, out A2UIComponent? owner))
         {
             if (!ReferenceEquals(owner, component))
@@ -260,7 +295,8 @@ internal sealed class ComponentFlattener
             }
 
             string type = A2UIEnum.LowerFirst(component.ComponentName);
-            string stem = _prefixes[component] is { } prefix ? $"{prefix}__{type}_" : type + "_";
+            // Only a top-level component has no prefix, and every top-level component has a reserved id.
+            string stem = _prefixes[component]! + Separator + type + "_";
             int next = _counters.GetValueOrDefault(stem, 1);
             string id;
             do

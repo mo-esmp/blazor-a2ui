@@ -37,19 +37,44 @@ public sealed class A2UIMessagesTests
     }
 
     /// <summary>
-    /// Proves that an id the agent chose is never generated for another component.
+    /// Proves that a chosen id may not use the separator that generated ids use, so chosen and generated ids never
+    /// collide.
     /// </summary>
-    [Fact]
-    public void UpdateComponents_ChosenIdMatchesGeneratedPattern_SkipsIt()
+    [Theory]
+    [InlineData("card__text_1")]
+    [InlineData("a__b")]
+    public void UpdateComponents_ChosenIdWithSeparator_Throws(string id)
     {
         // Arrange
-        Row root = new() { Children = [new Text { Content = "a" }, new Text { Id = "root__text_1", Content = "b" }] };
+        Row root = new() { Children = [new Text { Content = "a" }, new Text { Id = id, Content = "b" }] };
 
         // Act
-        JsonArray components = Components(A2UIMessages.UpdateComponents("main", root));
+        Action build = () => A2UIMessages.UpdateComponents("main", root);
 
         // Assert
-        Ids(components).ShouldBe(["root__text_2", "root__text_1", "root"]);
+        build.ShouldThrow<InvalidOperationException>();
+    }
+
+    /// <summary>
+    /// Proves that updating one part of a surface leaves a sibling with a chosen id alone: the renderer still shows the
+    /// sibling's text after the update.
+    /// </summary>
+    [Fact]
+    public void UpdateComponents_PartialUpdateNextToChosenSibling_KeepsSibling()
+    {
+        // Arrange
+        using A2UIMessageValidator validator = new();
+        static Card BuildCard() => new() { Id = "card", Child = new Text { Content = "inside" } };
+        Column root = new() { Children = [BuildCard(), new Text { Id = "card_text_1", Content = "sibling" }] };
+        validator.Validate(A2UIMessages.CreateSurface("main", root)).IsValid.ShouldBeTrue();
+
+        // Act
+        A2UIValidationResult result = validator.Validate(A2UIMessages.UpdateComponents("main", [BuildCard()]));
+
+        // Assert
+        result.IsValid.ShouldBeTrue();
+        validator.Surfaces["main"].Components["card_text_1"].Properties["text"]!.GetValue<string>().ShouldBe("sibling");
+        validator.Surfaces["main"].Components["card__text_1"].Properties["text"]!.GetValue<string>().ShouldBe("inside");
     }
 
     /// <summary>
@@ -188,6 +213,35 @@ public sealed class A2UIMessagesTests
 
         // Act
         Action build = () => A2UIMessages.UpdateComponents("main", node);
+
+        // Assert
+        build.ShouldThrow<InvalidOperationException>();
+    }
+
+    /// <summary>
+    /// Proves that the depth limit applies on every path to a shared component: a component first reached near the
+    /// top is refused when a longer path to it would put its descendants past the limit.
+    /// </summary>
+    [Fact]
+    public void UpdateComponents_SharedSubtreeTooDeepOnLongerPath_Throws()
+    {
+        // Arrange
+        A2UIComponent shared = new Text { Content = "leaf" };
+        for (int i = 0; i < 25; i++)
+        {
+            shared = new Card { Child = shared };
+        }
+
+        A2UIComponent longPath = shared;
+        for (int i = 0; i < 30; i++)
+        {
+            longPath = new Card { Child = longPath };
+        }
+
+        Column root = new() { Children = [shared, longPath] };
+
+        // Act
+        Action build = () => A2UIMessages.UpdateComponents("main", root);
 
         // Assert
         build.ShouldThrow<InvalidOperationException>();

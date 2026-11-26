@@ -428,7 +428,8 @@ public sealed class A2UIEvaluator
             : throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, "'@call' must be a non-empty string.");
         if (name.StartsWith('@'))
         {
-            return; // System functions such as @index have no catalog entry; evaluating them is the only check.
+            CheckSystemCall(name, context, scope);
+            return;
         }
 
         string catalogId = A2UIValues.AsString(call["catalogId"]) is { Length: > 0 } id
@@ -450,11 +451,29 @@ public sealed class A2UIEvaluator
         if (rawArgs is not null)
         {
             PreflightNestedCalls(rawArgs, catalog, context, scope, inTemplate: false, 0);
+            CheckNestedSystemCalls(rawArgs, context, scope, 0);
         }
 
         // The definition is not null here: CheckBoundaries rejects an unknown function in an agent call.
-        if (definition!.ArgsSchema is not { } schema || (rawArgs is not null && IsDynamic(rawArgs, 0)))
+        if (definition!.ArgsSchema is not { } schema)
         {
+            return;
+        }
+
+        if (rawArgs is not null && IsDynamic(rawArgs, 0))
+        {
+            // Some arguments are known only once they resolve: check what does not depend on them.
+            JsonObject known = new();
+            foreach ((string key, JsonNode? value) in rawArgs)
+            {
+                known[UnescapeKey(key)] = value?.DeepClone();
+            }
+
+            if (ArgsSchema.ValidateUnresolved(schema, known) is { } unresolvedProblem)
+            {
+                throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Invalid arguments for function '{name}': {unresolvedProblem}");
+            }
+
             return;
         }
 
@@ -471,6 +490,46 @@ public sealed class A2UIEvaluator
         if (ArgsSchema.Validate(schema, args) is { } problem)
         {
             throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Invalid arguments for function '{name}': {problem}");
+        }
+    }
+
+    /// <summary>
+    /// Checks the system function calls (such as <c>@index</c>) nested in an agent call's arguments, which
+    /// <see cref="PreflightNestedCalls"/> leaves alone. String arguments are data and are not parsed.
+    /// </summary>
+    /// <param name="node">The argument value to check.</param>
+    /// <param name="context">The context the call runs in.</param>
+    /// <param name="scope">The agent call's scope.</param>
+    /// <param name="depth">The nesting depth, bounded by <see cref="MaxDepth"/>.</param>
+    /// <exception cref="A2UIException">A nested system call is unknown or outside its scope.</exception>
+    private static void CheckNestedSystemCalls(JsonNode? node, EvaluationContext context, EvaluationScope scope, int depth)
+    {
+        if (depth > MaxDepth)
+        {
+            return; // PreflightNestedCalls has already refused arguments this deep.
+        }
+
+        switch (node)
+        {
+            case JsonObject obj:
+                if (A2UIValues.AsString(obj["@call"]) is { } nested && nested.StartsWith('@'))
+                {
+                    CheckSystemCall(nested, context, scope);
+                }
+
+                foreach ((string _, JsonNode? child) in obj)
+                {
+                    CheckNestedSystemCalls(child, context, scope, depth + 1);
+                }
+
+                break;
+            case JsonArray arr:
+                foreach (JsonNode? item in arr)
+                {
+                    CheckNestedSystemCalls(item, context, scope, depth + 1);
+                }
+
+                break;
         }
     }
 
@@ -658,14 +717,14 @@ public sealed class A2UIEvaluator
     }
 
     /// <summary>
-    /// Evaluates a system function (a name starting with <c>@</c>); <c>@index</c> is the only one.
+    /// Checks a system function call's name and scope before it runs: only <c>@index</c> exists, and only inside a
+    /// collection template iteration.
     /// </summary>
-    /// <exception cref="A2UIException">The name is unknown, or <c>@index</c> is used outside a collection template.</exception>
-    private async ValueTask<JsonNode?> CallSystemFunctionAsync(
-        string name,
-        JsonObject? rawArgs,
-        EvaluationContext context,
-        EvaluationScope scope)
+    /// <param name="name">The function name, starting with <c>@</c>.</param>
+    /// <param name="context">The context the call runs in.</param>
+    /// <param name="scope">The scope of the evaluation.</param>
+    /// <exception cref="A2UIException">The function is unknown or is called outside its scope.</exception>
+    internal static void CheckSystemCall(string name, EvaluationContext context, EvaluationScope scope)
     {
         if (name != "@index")
         {
@@ -679,6 +738,19 @@ public sealed class A2UIEvaluator
                 ? new A2UIException(A2UIErrorCodes.ExecutionError, message)
                 : new A2UIExpressionException(message);
         }
+    }
+
+    /// <summary>
+    /// Evaluates a system function (a name starting with <c>@</c>); <c>@index</c> is the only one.
+    /// </summary>
+    /// <exception cref="A2UIException">The name is unknown, or <c>@index</c> is used outside a collection template.</exception>
+    private async ValueTask<JsonNode?> CallSystemFunctionAsync(
+        string name,
+        JsonObject? rawArgs,
+        EvaluationContext context,
+        EvaluationScope scope)
+    {
+        CheckSystemCall(name, context, scope);
 
         double offset = 0;
         if (rawArgs is not null)

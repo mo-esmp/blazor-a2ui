@@ -195,6 +195,8 @@ public sealed class A2UIMessageValidatorTests
     [InlineData("""{"@call":"echo","catalogId":"urn:tools","args":{"value":5}}""")]
     [InlineData("""{"@call":"echo","catalogId":"urn:tools"}""")]
     [InlineData("""{"@call":"echo","catalogId":"urn:tools","args":{"value":{"@call":"secret","catalogId":"urn:tools"}}}""")]
+    [InlineData("""{"@call":"echo","catalogId":"urn:tools","args":{"other":{"@path":"/x"}}}""")]
+    [InlineData("""{"@call":"echo","catalogId":"urn:tools","args":{"value":5,"other":{"@path":"/x"}}}""")]
     public void Validate_CallRendererFunctionRefused_ReportsInvalidFunctionCall(string callFunction)
     {
         // Arrange
@@ -205,8 +207,73 @@ public sealed class A2UIMessageValidatorTests
         A2UIValidationResult result = validator.Validate(RendererCall(callFunction));
 
         // Assert
-        result.Errors.ShouldHaveSingleItem().Code.ShouldBe(A2UIErrorCodes.InvalidFunctionCall);
+        A2UIErrorReport error = result.Errors.ShouldHaveSingleItem();
+        error.Code.ShouldBe(A2UIErrorCodes.InvalidFunctionCall);
+        error.FunctionCallId.ShouldBe("c1");
         runs.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// Proves that a system function call the renderer would refuse is reported, as the execution error its response
+    /// would carry: an unknown system function, and <c>@index</c> outside a list, at the top level or nested in the
+    /// arguments.
+    /// </summary>
+    [Theory]
+    [InlineData("""{"@call":"@missing","catalogId":"urn:tools"}""")]
+    [InlineData("""{"@call":"@index","catalogId":"urn:tools"}""")]
+    [InlineData("""{"@call":"echo","catalogId":"urn:tools","args":{"value":{"@call":"@index"}}}""")]
+    public void Validate_CallRendererFunctionSystemCallRefused_ReportsExecutionError(string callFunction)
+    {
+        // Arrange
+        using A2UIMessageValidator validator = ToolsValidator(() => { });
+
+        // Act
+        A2UIValidationResult result = validator.Validate(RendererCall(callFunction));
+
+        // Assert
+        A2UIErrorReport error = result.Errors.ShouldHaveSingleItem();
+        error.Code.ShouldBe(A2UIErrorCodes.ExecutionError);
+        error.FunctionCallId.ShouldBe("c1");
+    }
+
+    /// <summary>
+    /// Proves that a binding in the arguments defers only the checks that depend on its value: a call whose required
+    /// argument is a binding passes.
+    /// </summary>
+    [Fact]
+    public void Validate_CallRendererFunctionBoundArgument_IsValid()
+    {
+        // Arrange
+        using A2UIMessageValidator validator = ToolsValidator(() => { });
+
+        // Act
+        A2UIValidationResult result = validator.Validate(RendererCall("""{"@call":"echo","catalogId":"urn:tools","args":{"value":{"@path":"/x"}}}"""));
+
+        // Assert
+        result.Errors.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Proves that a refused renderer function call does not stop a batch: the renderer answers the call with an
+    /// error and applies the next message, and so does the mirror.
+    /// </summary>
+    [Fact]
+    public void Validate_BatchWithRefusedCall_AppliesFollowingMessages()
+    {
+        // Arrange
+        using A2UIMessageValidator validator = ToolsValidator(() => { });
+        JsonArray batch =
+        [
+            RendererCall("""{"@call":"echo","catalogId":"urn:missing","args":{"value":"x"}}"""),
+            A2UIMessages.CreateSurface("main", new Text { Content = "hi" }),
+        ];
+
+        // Act
+        A2UIValidationResult result = validator.Validate(batch);
+
+        // Assert
+        result.Errors.ShouldHaveSingleItem().FunctionCallId.ShouldBe("c1");
+        validator.Surfaces.ContainsKey("main").ShouldBeTrue();
     }
 
     /// <summary>
@@ -224,7 +291,9 @@ public sealed class A2UIMessageValidatorTests
         A2UIValidationResult result = validator.Validate(message);
 
         // Assert
-        result.Errors.ShouldHaveSingleItem().Code.ShouldBe(A2UIErrorCodes.InvalidFunctionCall);
+        A2UIErrorReport error = result.Errors.ShouldHaveSingleItem();
+        error.Code.ShouldBe(A2UIErrorCodes.InvalidFunctionCall);
+        error.FunctionCallId.ShouldBe("c1");
     }
 
     /// <summary>

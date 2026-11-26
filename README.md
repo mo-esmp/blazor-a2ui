@@ -194,7 +194,8 @@ JsonObject message = A2UIMessages.CreateSurface("signup", form, dataModel: new J
 ```
 
 - **Ids.** The root gets `root`. Other components keep the `Id` you set, or get one built from the
-  nearest ancestor with an id, such as `root__text_1`. Set an `Id` on any part you will update
+  nearest ancestor with an id, such as `root__text_1`. Chosen ids may not contain `__`, so they
+  never collide with generated ones. Set an `Id` on any part you will update
   later: `A2UIMessages.UpdateComponents("signup", [newCard])` then replaces that part and leaves
   the rest of the surface alone. `A2UIComponent.Ref("id")` places a component that is already on
   the surface without sending it again.
