@@ -67,6 +67,13 @@ internal static class LenientJson
         try
         {
             node = JsonNode.Parse(text, documentOptions: s_options);
+            if (!HasValidStrings(node))
+            {
+                node = null;
+                error = "The JSON has a string that is not valid Unicode, such as an unpaired surrogate escape.";
+                return false;
+            }
+
             error = null;
             return true;
         }
@@ -75,6 +82,58 @@ internal static class LenientJson
             node = null;
             error = ex.Message;
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Returns whether every key and string in the JSON can be read. The parser checks escapes only lazily, so an
+    /// unpaired surrogate such as <c>\ud800</c> would otherwise throw later, when a caller reads it.
+    /// </summary>
+    /// <param name="node">The parsed JSON.</param>
+    private static bool HasValidStrings(JsonNode? node)
+    {
+        try
+        {
+            Visit(node);
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads every key and string under a node, so a string that cannot be decoded throws here. The depth is bounded
+    /// by the parser's <see cref="JsonDocumentOptions.MaxDepth"/>.
+    /// </summary>
+    /// <param name="node">The node.</param>
+    private static void Visit(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                foreach ((string key, JsonNode? value) in obj)
+                {
+                    _ = key.Length;
+                    Visit(value);
+                }
+
+                break;
+            case JsonArray array:
+                foreach (JsonNode? item in array)
+                {
+                    Visit(item);
+                }
+
+                break;
+            case JsonValue value when value.GetValueKind() == JsonValueKind.String:
+                _ = value.GetValue<string>();
+                break;
         }
     }
 

@@ -204,7 +204,11 @@ public sealed class A2UIPromptBuilder
             {
                 functions.Remove(function.Name);
             }
-            else if (!functions.ContainsKey(function.Name))
+            else if (functions[function.Name] is JsonObject entry)
+            {
+                MergeFunction(entry, function);
+            }
+            else
             {
                 functions[function.Name] = FunctionSchema(function);
             }
@@ -243,11 +247,7 @@ public sealed class A2UIPromptBuilder
         schema["properties"] = properties;
         schema["required"] = new JsonArray("@call");
         schema["returnType"] = function.ReturnType;
-        schema["allowedCallers"] = function.AllowedCallers switch
-        {
-            AllowedCallers.RendererOrAgent => "rendererOrAgent",
-            _ => "rendererOnly",
-        };
+        schema["allowedCallers"] = CallersName(function.AllowedCallers);
         if (function.RequiresUserActivation)
         {
             schema["requiresUserActivation"] = true;
@@ -255,6 +255,95 @@ public sealed class A2UIPromptBuilder
 
         return schema;
     }
+
+    /// <summary>
+    /// Updates a function's entry in a catalog document to the catalog's definition of it, which
+    /// <see cref="Catalog.Extend"/> may have replaced while keeping the old document. Only what differs is changed, so
+    /// the document's other annotations stay.
+    /// </summary>
+    /// <param name="entry">The function's entry in the document.</param>
+    /// <param name="function">The catalog's definition of the function.</param>
+    private static void MergeFunction(JsonObject entry, FunctionDefinition function)
+    {
+        if (A2UIValues.AsString(entry["description"]) != function.Description)
+        {
+            if (function.Description is { } description)
+            {
+                entry["description"] = description;
+            }
+            else
+            {
+                entry.Remove("description");
+            }
+        }
+
+        if ((A2UIValues.AsString(entry["returnType"]) ?? "any") != function.ReturnType)
+        {
+            entry["returnType"] = function.ReturnType;
+        }
+
+        if (DocumentCallers(entry) != function.AllowedCallers)
+        {
+            entry["allowedCallers"] = CallersName(function.AllowedCallers);
+        }
+
+        bool activation = entry["requiresUserActivation"] is JsonValue flag && flag.TryGetValue(out bool value) && value;
+        if (activation != function.RequiresUserActivation)
+        {
+            if (function.RequiresUserActivation)
+            {
+                entry["requiresUserActivation"] = true;
+            }
+            else
+            {
+                entry.Remove("requiresUserActivation");
+            }
+        }
+
+        JsonObject? properties = entry["properties"] as JsonObject;
+        if (JsonNode.DeepEquals(properties?["args"], function.ArgsSchema))
+        {
+            return;
+        }
+
+        if (properties is null)
+        {
+            properties = [];
+            entry["properties"] = properties;
+        }
+
+        if (function.ArgsSchema is { } args)
+        {
+            properties["args"] = args.DeepClone();
+        }
+        else
+        {
+            properties.Remove("args");
+        }
+    }
+
+    /// <summary>
+    /// Returns who may call a function, as its entry in a catalog document says; an unknown value counts as
+    /// renderer-only, as the safest reading.
+    /// </summary>
+    /// <param name="entry">The function's entry in the document.</param>
+    private static AllowedCallers DocumentCallers(JsonObject entry) => A2UIValues.AsString(entry["allowedCallers"]) switch
+    {
+        "agentOnly" => AllowedCallers.AgentOnly,
+        "rendererOrAgent" => AllowedCallers.RendererOrAgent,
+        _ => AllowedCallers.RendererOnly,
+    };
+
+    /// <summary>
+    /// Returns the catalog document's name for who may call a function.
+    /// </summary>
+    /// <param name="callers">Who may call it.</param>
+    private static string CallersName(AllowedCallers callers) => callers switch
+    {
+        AllowedCallers.RendererOrAgent => "rendererOrAgent",
+        AllowedCallers.AgentOnly => "agentOnly",
+        _ => "rendererOnly",
+    };
 
     /// <summary>
     /// Checks an example against the catalogs and writes it as an A2UI JSON block.

@@ -213,6 +213,50 @@ public sealed partial class A2UIPromptBuilderTests
     }
 
     /// <summary>
+    /// Proves that a function replaced with <see cref="Catalog.Extend"/> is described as replaced, keeping the
+    /// document's other annotations.
+    /// </summary>
+    [Fact]
+    public void Build_OverriddenFunction_UsesNewDefinition()
+    {
+        // Arrange
+        Catalog catalog = BasicCatalog.Create().Extend(functions:
+        [
+            new FunctionDefinition("required") { Description = "Overridden.", ReturnType = "string", AllowedCallers = AllowedCallers.RendererOrAgent, RequiresUserActivation = true },
+        ]);
+        A2UIPromptBuilder builder = new([catalog]);
+
+        // Act
+        JsonObject document = Section(builder.Build(), "Catalog Schema").ShouldNotBeNull();
+
+        // Assert
+        JsonObject required = document["functions"]!["required"]!.AsObject();
+        required["description"]!.GetValue<string>().ShouldBe("Overridden.");
+        required["returnType"]!.GetValue<string>().ShouldBe("string");
+        required["allowedCallers"]!.GetValue<string>().ShouldBe("rendererOrAgent");
+        required["requiresUserActivation"]!.GetValue<bool>().ShouldBeTrue();
+        required["properties"]!.AsObject().ContainsKey("args").ShouldBeFalse();
+        required["type"]!.GetValue<string>().ShouldBe("object");
+    }
+
+    /// <summary>
+    /// Proves that functions read from the catalog's document are written exactly as the document has them.
+    /// </summary>
+    [Fact]
+    public void Build_DocumentFunctions_AreUnchanged()
+    {
+        // Arrange
+        JsonObject source = BasicCatalog.GetDocument();
+        A2UIPromptBuilder builder = new([BasicCatalog.Create()]);
+
+        // Act
+        JsonObject document = Section(builder.Build(), "Catalog Schema").ShouldNotBeNull();
+
+        // Assert
+        JsonNode.DeepEquals(document["functions"], source["functions"]).ShouldBeTrue();
+    }
+
+    /// <summary>
     /// Proves that a component the catalog's document does not describe is refused, since the model could not learn it.
     /// </summary>
     [Fact]

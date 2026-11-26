@@ -101,6 +101,16 @@ public sealed class A2UIResponseStream
     private bool _inString;
 
     /// <summary>
+    /// Whether the string the scan is inside opened with a curly quote.
+    /// </summary>
+    private bool _curlyString;
+
+    /// <summary>
+    /// Whether the block's array has just had a message, so a comma or its end must come next.
+    /// </summary>
+    private bool _needComma;
+
+    /// <summary>
     /// The comment the scan is inside, if any.
     /// </summary>
     private CommentKind _comment;
@@ -125,6 +135,11 @@ public sealed class A2UIResponseStream
     /// and backticks are dropped.
     /// </summary>
     private bool _atSegmentStart = true;
+
+    /// <summary>
+    /// Whether the segment being read follows a block, so a Markdown fence that closes the block's fence may start it.
+    /// </summary>
+    private bool _afterBlock;
 
     /// <summary>
     /// How many messages have been returned.
@@ -176,6 +191,27 @@ public sealed class A2UIResponseStream
         /// A single message.
         /// </summary>
         Object,
+    }
+
+    /// <summary>
+    /// What follows a piece of text outside blocks.
+    /// </summary>
+    private enum TextEnd
+    {
+        /// <summary>
+        /// More text of the same segment may follow.
+        /// </summary>
+        Open,
+
+        /// <summary>
+        /// A block follows.
+        /// </summary>
+        Block,
+
+        /// <summary>
+        /// The answer ends.
+        /// </summary>
+        Answer,
     }
 
     /// <summary>
@@ -302,7 +338,7 @@ public sealed class A2UIResponseStream
 
                 if (close > 0)
                 {
-                    EmitText(text[..open], parts, segmentEnd: true);
+                    EmitText(text[..open], parts, TextEnd.Block);
                     _text.Clear();
                     _inBlock = true;
                     _atSegmentStart = true;
@@ -318,8 +354,8 @@ public sealed class A2UIResponseStream
                 continue;
             }
 
-            int cut = SafeTextEnd(text);
-            EmitText(text[..cut], parts, segmentEnd: false);
+            int cut = MayStartClosingFence(text) ? 0 : SafeTextEnd(text);
+            EmitText(text[..cut], parts, TextEnd.Open);
             _text.Remove(0, cut);
         }
 
@@ -352,11 +388,17 @@ public sealed class A2UIResponseStream
                     ? $"The answer ended inside an A2UI JSON block before its JSON was complete. Close every block with {A2UIResponseParser.CloseTag}."
                     : "The JSON ended before it was complete."));
             }
+            else if (_comment != CommentKind.None || (_position < _length && _buffer[_position] == '/'))
+            {
+                parts.Add(new A2UIErrorPart(_wrapped
+                    ? "The answer ended inside an unfinished comment in an A2UI JSON block."
+                    : "The JSON ends with an unfinished comment."));
+            }
         }
 
         if (_text.Length > 0)
         {
-            EmitText(_text.ToString(), parts, segmentEnd: true);
+            EmitText(_text.ToString(), parts, TextEnd.Answer);
             _text.Clear();
         }
 
@@ -387,18 +429,20 @@ public sealed class A2UIResponseStream
             return 0;
         }
 
-        int end = text.IndexOf('>', i);
+        // The whole tag, from its < to its >, may be at most MaxOpenTagLength characters, however the text is split.
+        int limit = Math.Min(text.Length, start + MaxOpenTagLength);
+        int end = text.IndexOf('>', i, limit - i);
         if (end >= 0)
         {
             return end + 1;
         }
 
-        return text.Length - start > MaxOpenTagLength ? 0 : -1;
+        return limit - start >= MaxOpenTagLength ? 0 : -1;
     }
 
     /// <summary>
     /// Returns how much of the text outside blocks can be returned now: all of it but a tail that could start an open
-    /// tag, or a Markdown fence and whitespace that would be dropped if a tag follows.
+    /// tag, or a Markdown fence, whole or partly written, and whitespace that would be dropped if a tag follows.
     /// </summary>
     /// <param name="text">The text.</param>
     private static int SafeTextEnd(string text)
@@ -422,15 +466,73 @@ public sealed class A2UIResponseStream
             }
         }
 
-        return TrailingFenceStart(text, cut);
+        int fence = TrailingFenceStart(text, cut);
+
+        // A line of one or two backticks may still become a fence.
+        int ticks = cut;
+        while (ticks > 0 && text[ticks - 1] == '`')
+        {
+            ticks--;
+        }
+
+        if (cut - ticks is 1 or 2)
+        {
+            int lineStart = ticks;
+            while (lineStart > 0 && text[lineStart - 1] is ' ' or '\t')
+            {
+                lineStart--;
+            }
+
+            if (lineStart == 0 || text[lineStart - 1] is '\n' or '\r')
+            {
+                return Math.Min(fence, TrailingWhitespaceStart(text, ticks));
+            }
+        }
+
+        return fence;
     }
 
     /// <summary>
-    /// Returns where a run of whitespace, or a Markdown fence with its whitespace, that ends at a position begins.
+    /// Returns where a run of whitespace, or a Markdown fence line such as <c>```json</c> with the whitespace around
+    /// it, that ends at a position begins. A fence counts only when its backticks start a line.
     /// </summary>
     /// <param name="text">The text.</param>
     /// <param name="end">Where the run ends.</param>
     private static int TrailingFenceStart(string text, int end)
+    {
+        int i = TrailingWhitespaceStart(text, end);
+        int word = i;
+        while (word > 0 && (char.IsAsciiLetterOrDigit(text[word - 1]) || text[word - 1] is '-' or '+' or '_'))
+        {
+            word--;
+        }
+
+        int ticks = word;
+        while (ticks > 0 && text[ticks - 1] == '`')
+        {
+            ticks--;
+        }
+
+        if (word - ticks != 3)
+        {
+            return i;
+        }
+
+        int lineStart = ticks;
+        while (lineStart > 0 && text[lineStart - 1] is ' ' or '\t')
+        {
+            lineStart--;
+        }
+
+        return lineStart == 0 || text[lineStart - 1] is '\n' or '\r' ? TrailingWhitespaceStart(text, ticks) : i;
+    }
+
+    /// <summary>
+    /// Returns where a run of whitespace that ends at a position begins.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="end">Where the run ends.</param>
+    private static int TrailingWhitespaceStart(string text, int end)
     {
         int i = end;
         while (i > 0 && char.IsWhiteSpace(text[i - 1]))
@@ -438,50 +540,54 @@ public sealed class A2UIResponseStream
             i--;
         }
 
-        int word = i;
-        while (word > 0 && (char.IsAsciiLetter(text[word - 1]) || text[word - 1] == '-'))
-        {
-            word--;
-        }
-
-        int ticks = word;
-        while (ticks > 0 && word - ticks < 3 && text[ticks - 1] == '`')
-        {
-            ticks--;
-        }
-
-        if (ticks == word)
-        {
-            return i;
-        }
-
-        while (ticks > 0 && char.IsWhiteSpace(text[ticks - 1]))
-        {
-            ticks--;
-        }
-
-        return ticks;
+        return i;
     }
 
     /// <summary>
-    /// Returns text outside blocks as a part, dropping leading whitespace and backticks at the start of a segment and
-    /// a trailing fence and whitespace at its end.
+    /// Returns whether the text right after a block may still turn into the Markdown fence that closes the block's
+    /// fence, so it must wait for more text: whitespace and then one or two backticks.
+    /// </summary>
+    /// <param name="text">The text outside blocks that has not been returned yet.</param>
+    private bool MayStartClosingFence(string text)
+    {
+        if (!_atSegmentStart || !_afterBlock)
+        {
+            return false;
+        }
+
+        string rest = text.TrimStart();
+        return rest.Length is > 0 and < 3 && rest.All(c => c == '`');
+    }
+
+    /// <summary>
+    /// Returns text outside blocks as a part. At the start of a segment, leading whitespace is dropped, and right after
+    /// a block so is the Markdown fence line that closes the block's fence. Before a block, the fence line that opens
+    /// the block's fence and the whitespace are dropped; at the end of the answer, only the whitespace is. Backticks
+    /// anywhere else are the answer's own Markdown and are kept.
     /// </summary>
     /// <param name="text">The text.</param>
     /// <param name="parts">Receives the part.</param>
-    /// <param name="segmentEnd">Whether the text ends its segment: a block or the end of the answer follows.</param>
-    private void EmitText(string text, List<A2UIResponsePart> parts, bool segmentEnd)
+    /// <param name="textEnd">What follows the text.</param>
+    private void EmitText(string text, List<A2UIResponsePart> parts, TextEnd textEnd)
     {
         int start = 0;
         if (_atSegmentStart)
         {
-            while (start < text.Length && (char.IsWhiteSpace(text[start]) || text[start] == '`'))
+            start = text.Length - text.AsSpan().TrimStart().Length;
+            if (_afterBlock && text.AsSpan(start).StartsWith("```", StringComparison.Ordinal)
+                && (start + 3 == text.Length || char.IsWhiteSpace(text[start + 3])))
             {
-                start++;
+                start += 3;
+                start = text.Length - text.AsSpan(start).TrimStart().Length;
             }
         }
 
-        int end = segmentEnd ? TrailingFenceStart(text, text.Length) : text.Length;
+        int end = textEnd switch
+        {
+            TextEnd.Block => TrailingFenceStart(text, text.Length),
+            TextEnd.Answer => TrailingWhitespaceStart(text, text.Length),
+            _ => text.Length,
+        };
         if (end > start)
         {
             _atSegmentStart = false;
@@ -528,7 +634,7 @@ public sealed class A2UIResponseStream
                     continue;
                 }
 
-                _inString = c != '"';
+                _inString = _curlyString ? c is not ('"' or '\u201C' or '\u201D') : c != '"';
                 _position++;
                 continue;
             }
@@ -704,14 +810,16 @@ public sealed class A2UIResponseStream
         bool betweenItems = _shape == BlockShape.Array && _depth == 1;
         switch (c)
         {
-            case '"':
+            case '"' or '\u201C' or '\u201D':
                 if (betweenItems)
                 {
                     Reject(parts, "Each item of an A2UI JSON block must be a message object.");
                     return;
                 }
 
+                // A string opened with a curly quote may close with any double quote, as LenientJson straightens them.
                 _inString = true;
+                _curlyString = c != '"';
                 break;
             case '{' or '[':
                 if (betweenItems)
@@ -719,6 +827,12 @@ public sealed class A2UIResponseStream
                     if (c != '{')
                     {
                         Reject(parts, "Each item of an A2UI JSON block must be a message object.");
+                        return;
+                    }
+
+                    if (_needComma)
+                    {
+                        Reject(parts, "The messages in an A2UI JSON block must be separated by commas.");
                         return;
                     }
 
@@ -748,6 +862,8 @@ public sealed class A2UIResponseStream
                     {
                         return;
                     }
+
+                    _needComma = true;
                 }
                 else if (_depth == 0)
                 {
@@ -760,8 +876,18 @@ public sealed class A2UIResponseStream
                 }
 
                 break;
+            case ',' when betweenItems:
+                // One comma after each message; a trailing comma before ] is forgiven.
+                if (!_needComma)
+                {
+                    Reject(parts, "An A2UI JSON block has a comma where a message should be.");
+                    return;
+                }
+
+                _needComma = false;
+                break;
             default:
-                if (betweenItems && !char.IsWhiteSpace(c) && c != ',')
+                if (betweenItems && !char.IsWhiteSpace(c))
                 {
                     Reject(parts, "Each item of an A2UI JSON block must be a message object.");
                     return;
@@ -965,10 +1091,13 @@ public sealed class A2UIResponseStream
         _shape = BlockShape.Unknown;
         _depth = 0;
         _inString = false;
+        _curlyString = false;
+        _needComma = false;
         _comment = CommentKind.None;
         _closed = false;
         _rejected = false;
         _atSegmentStart = true;
+        _afterBlock = true;
     }
 
     /// <summary>

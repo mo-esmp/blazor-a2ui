@@ -32,6 +32,10 @@ public sealed class A2UIResponseParserTests
         $"<a2ui-json>[{Create}, 42]</a2ui-json>after",
         $"<a2ui-json>[{Create},]</a2ui-json><a2ui-json>[{Update}",
         "Text with ``` inline fence and `code` and <a2ui and <a2ui-jsonx>.",
+        "Run `dotnet test`",
+        "```csharp\nint x = 1;\n```",
+        $"Before\n```\n<a2ui-json>[{Create}]</a2ui-json>\n```\nUse `x`.\n``",
+        "<a2ui-json>[{\u201Cversion\u201D:\u201C1.0\u201D,\u201CdeleteSurface\u201D:{\u201CsurfaceId\u201D:\u201Ccost } </a2ui-json>\u201D}}]</a2ui-json>after",
         "<a2ui-json>/* a \"} ** */[// first }\n{\"deleteSurface\": /* \"{ */ {\"surfaceId\":\"m\"}}, /**/]</a2ui-json>end",
     };
 
@@ -257,6 +261,119 @@ public sealed class A2UIResponseParserTests
     }
 
     /// <summary>
+    /// Proves that Markdown in ordinary text keeps its backticks: inline code, and a code block with its fence.
+    /// </summary>
+    /// <param name="answer">The answer, which has no block.</param>
+    [Theory]
+    [InlineData("Run `dotnet test`")]
+    [InlineData("```csharp\nint x = 1;\n```")]
+    [InlineData("Use ``` to start a fence.")]
+    public void Parse_MarkdownWithoutBlock_KeepsBackticks(string answer)
+    {
+        // Arrange
+        string expected = "T:" + answer;
+
+        // Act
+        IReadOnlyList<A2UIResponsePart> parts = A2UIResponseParser.Parse(answer);
+
+        // Assert
+        Describe(parts).ShouldBe([expected]);
+    }
+
+    /// <summary>
+    /// Proves that only the fence lines around a block are dropped, and inline code after it is kept.
+    /// </summary>
+    [Fact]
+    public void Parse_FenceAroundBlock_KeepsOtherBackticks()
+    {
+        // Arrange
+        string answer = $"See `main`:\n```json\n<a2ui-json>[{Create}]</a2ui-json>\n```\nUse `x`.";
+
+        // Act
+        IReadOnlyList<A2UIResponsePart> parts = A2UIResponseParser.Parse(answer);
+
+        // Assert
+        Describe(parts).ShouldBe(["T:See `main`:", $"M:{Create}", "T:Use `x`."]);
+    }
+
+    /// <summary>
+    /// Proves that a string in curly quotes keeps braces and a close tag as text while the block is scanned.
+    /// </summary>
+    [Fact]
+    public void Parse_CurlyQuotedStringWithBraceAndTag_IsOneString()
+    {
+        // Arrange
+        string answer = "<a2ui-json>[{\u201CupdateDataModel\u201D:{\u201CsurfaceId\u201D:\u201Cm\u201D,\u201Cpath\u201D:\u201C/t\u201D,\u201Cvalue\u201D:\u201Ccost } today </a2ui-json>\u201D}}]</a2ui-json>after";
+
+        // Act
+        IReadOnlyList<A2UIResponsePart> parts = A2UIResponseParser.Parse(answer);
+
+        // Assert
+        parts.Count.ShouldBe(2);
+        parts[0].ShouldBeOfType<A2UIMessagePart>().Message["updateDataModel"]!["value"]!.GetValue<string>().ShouldBe("cost } today </a2ui-json>");
+        parts[1].ShouldBe(new A2UITextPart("after"));
+    }
+
+    /// <summary>
+    /// Proves that an open tag longer than the limit is text and a shorter one is a tag, whether or not the text is
+    /// split just before its <c>&gt;</c>.
+    /// </summary>
+    /// <param name="attributeLength">The length of the tag's attribute value.</param>
+    /// <param name="isTag">Whether the tag is short enough to open a block.</param>
+    [Theory]
+    [InlineData(200, true)]
+    [InlineData(260, false)]
+    public void Append_LongOpenTagSplitBeforeEnd_ReadsLikeWhole(int attributeLength, bool isTag)
+    {
+        // Arrange
+        string open = $"<a2ui-json a=\"{new string('x', attributeLength)}\"";
+        string rest = $">[{Create}]</a2ui-json>";
+
+        // Act
+        string[] whole = Describe(A2UIResponseParser.Parse(open + rest));
+        string[] split = Describe(Stream([open, rest]));
+
+        // Assert
+        split.ShouldBe(whole);
+        whole.Any(p => p.StartsWith("M:", StringComparison.Ordinal)).ShouldBe(isTag);
+    }
+
+    /// <summary>
+    /// Proves that a string with an unpaired surrogate escape is an error part instead of an exception.
+    /// </summary>
+    [Fact]
+    public void ParseJson_UnpairedSurrogate_ReportsError()
+    {
+        // Arrange
+        string json = """{"version":"\ud800","deleteSurface":{"surfaceId":"m"}}""";
+
+        // Act
+        IReadOnlyList<A2UIResponsePart> parts = A2UIResponseParser.ParseJson(json);
+
+        // Assert
+        parts.Single().ShouldBeOfType<A2UIErrorPart>().Error.ShouldContain("not valid Unicode");
+    }
+
+    /// <summary>
+    /// Proves that raw JSON ending in an unfinished comment keeps its message and reports the rest.
+    /// </summary>
+    /// <param name="suffix">The text after the message.</param>
+    [Theory]
+    [InlineData(" /")]
+    [InlineData(" /* never closed")]
+    public void ParseJson_UnfinishedCommentAtEnd_ReportsErrorAfterMessage(string suffix)
+    {
+        // Arrange
+        string json = Create + suffix;
+
+        // Act
+        IReadOnlyList<A2UIResponsePart> parts = A2UIResponseParser.ParseJson(json);
+
+        // Assert
+        Describe(parts).ShouldBe([$"M:{Create}", "E:The JSON ends with an unfinished comment."]);
+    }
+
+    /// <summary>
     /// Proves that raw line breaks and tabs inside strings are read as escaped.
     /// </summary>
     [Fact]
@@ -362,6 +479,9 @@ public sealed class A2UIResponseParserTests
     [InlineData("""["deleteSurface"]""", "Each item of an A2UI JSON block must be a message object.")]
     [InlineData("""[[{"deleteSurface":{"surfaceId":"m"}}]]""", "Each item of an A2UI JSON block must be a message object.")]
     [InlineData("""[{"deleteSurface":{"surfaceId":m}}]""", "A2UI message 1 is not valid JSON:")]
+    [InlineData("""[{"deleteSurface":{"surfaceId":"m"}} {"deleteSurface":{"surfaceId":"n"}}]""", "The messages in an A2UI JSON block must be separated by commas.")]
+    [InlineData("[,]", "An A2UI JSON block has a comma where a message should be.")]
+    [InlineData("""[{"deleteSurface":{"surfaceId":"m"}},,]""", "An A2UI JSON block has a comma where a message should be.")]
     [InlineData("[}", "The JSON in the A2UI JSON block has a '}' that does not match the bracket it closes.")]
     [InlineData("""[{"deleteSurface":{"surfaceId":"m"]]""", "The JSON in the A2UI JSON block has a ']' that does not match the bracket it closes.")]
     public void Parse_BrokenBlock_ReportsErrorAndKeepsText(string block, string error)
