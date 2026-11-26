@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>BlazorA2UI.Agent</PackageId>
-    <Description>Agent-side helpers for A2UI v1.0: typed component builders for the basic catalog, message builders, a JSONL writer and a validator that checks messages the way a renderer would.</Description>
+    <Description>Agent-side helpers for A2UI v1.0: typed component builders for the basic catalog, message builders, a JSONL writer, a validator that checks messages the way a renderer would, handling of the messages a renderer sends back, and renderer function calls.</Description>
     <RootNamespace>BlazorA2UI</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>

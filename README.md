@@ -6,7 +6,8 @@ keeps a data model, and sends the user's actions back.
 
 > **Status: preview.** The protocol core (`BlazorA2UI.Core`) passes Google's conformance
 > suites, and the Razor components (`BlazorA2UI`) render the whole basic catalog. The agent side
-> (`BlazorA2UI.Agent`) has its builders and validator; the rest of it is in progress. Names may
+> (`BlazorA2UI.Agent`) has its builders, validator and the messages that flow back from the
+> renderer; LLM prompts and the streaming endpoint are in progress. Names may
 > still change before the first release.
 >
 > | Part | Package | State |
@@ -14,7 +15,8 @@ keeps a data model, and sends the user's actions back.
 > | Protocol core: messages, data model, bindings, functions, catalogs, validation, agent and renderer function calls | `BlazorA2UI.Core` | Done |
 > | Blazor components: the basic catalog as Razor components, with the safety rules below | `BlazorA2UI` | Done |
 > | Agent side: component and message builders, a JSONL writer, a validator that mirrors the renderer | `BlazorA2UI.Agent` | Done |
-> | Agent side: messages from the renderer, renderer function calls, LLM prompts and response parsing | `BlazorA2UI.Agent` | Planned |
+> | Agent side: messages from the renderer, agent functions, renderer function calls | `BlazorA2UI.Agent` | Done |
+> | Agent side: LLM prompts and response parsing | `BlazorA2UI.Agent` | Planned |
 > | Streaming endpoint for ASP.NET Core, and sample apps | `BlazorA2UI.Agent.AspNetCore` | Planned |
 
 ## Safety rules
@@ -154,8 +156,8 @@ the agent endpoint must allow your app's origin (CORS).
 | `tests/BlazorA2UI.Core.Tests` | | Unit and conformance tests. |
 | `src/BlazorA2UI` | `BlazorA2UI` | Razor components, the media allowlist and `a2ui.css`. |
 | `tests/BlazorA2UI.Tests` | | bUnit tests for the components and the rendering safety rules. |
-| `src/BlazorA2UI.Agent` | `BlazorA2UI.Agent` | Agent-side builders, writer and validator. No dependency beyond the core. |
-| `tests/BlazorA2UI.Agent.Tests` | | Tests for the builders and validator, including a strict check of every basic component. |
+| `src/BlazorA2UI.Agent` | `BlazorA2UI.Agent` | Agent-side builders, writer, validator, and handling of the renderer's messages. No dependency beyond the core. |
+| `tests/BlazorA2UI.Agent.Tests` | | Tests for the agent side, including a strict check of every basic component and round trips against the renderer core. |
 | `src/BlazorA2UI.Agent.AspNetCore` | `BlazorA2UI.Agent.AspNetCore` | Streaming endpoint for ASP.NET Core. Planned. |
 | `samples/` | | Blazor Server and WebAssembly sample apps and a sample agent. Planned. |
 
@@ -219,6 +221,63 @@ if (!result.IsValid)
 
 Custom components derive from `A2UIComponent` and write their properties through
 `A2UIComponentWriter`.
+
+## Handling messages from the renderer
+
+The renderer sends four kinds of messages back: `action` (the user did something),
+`callAgentFunction` (a binding or action calls a function the agent implements),
+`rendererFunctionResponse` (the answer to the agent's own call) and `error`.
+`A2UIRendererMessageProcessor` checks each one against the spec and routes it:
+
+```csharp
+using BlazorA2UI.Catalogs;
+
+Catalog catalog = Catalog.FromJson(catalogJson); // the catalog the renderer also has
+
+// Agent functions are declared in the catalog without an implementation, so the renderer
+// sends their calls to the agent. Arguments are checked against the declared schema first.
+A2UIAgentFunctions functions = new A2UIAgentFunctions([catalog])
+    .Add(catalog.CatalogId, "lookupOrder", async (call, cancellationToken) =>
+        await orders.FindStatusAsync(call.Args["orderId"]!.GetValue<string>(), cancellationToken));
+
+using A2UIRendererFunctionCalls rendererCalls = new(new A2UIRendererFunctionCallsOptions { Catalogs = [catalog], AgentFunctions = functions });
+
+A2UIRendererMessageProcessor processor = new(functions)
+{
+    OnAction = async (action, cancellationToken) =>
+    {
+        await RunAgentTurnAsync(action.Name, action.Context, cancellationToken);
+        return true;
+    },
+    OnRendererFunctionResponse = (response, _) => ValueTask.FromResult(rendererCalls.Resolve(response)),
+};
+
+A2UIRendererMessageResult result = await processor.ProcessLineAsync(line, cancellationToken);
+foreach (JsonObject reply in result.Replies)
+{
+    await SendToRendererAsync(reply); // agentFunctionResponse messages
+}
+```
+
+- **Agent functions.** Every `callAgentFunction` gets exactly one `agentFunctionResponse`.
+  Unknown functions get `UNKNOWN_FUNCTION`, bad arguments `INVALID_FUNCTION_CALL`. A handler
+  can throw `A2UIException` to choose its own code. Any other exception becomes
+  `EXECUTION_ERROR` with a generic message, so stack details never reach the browser; subscribe to
+  `A2UIAgentFunctions.FunctionFailed` to log them. `Timeout` limits how long a handler runs.
+- **Not handled.** A message without a callback, or one the callback declines by returning
+  `false`, comes back with `Handled == false`, so you can hand it to the model's turn.
+- **Calling renderer functions.** `A2UIRendererFunctionCalls.Call` builds a `callRendererFunction`
+  message and returns a task for the value. Arguments may be bindings, which the renderer
+  resolves against the surface's data model. With the agent's catalogs, a call the renderer would
+  refuse (a `rendererOnly` function, one that needs a user gesture, bad arguments) is refused before
+  it is sent. Calls time out after 30 seconds by default.
+
+```csharp
+A2UICall call = new("getLocation") { CatalogId = catalog.CatalogId };
+A2UIRendererFunctionCall pending = rendererCalls.Call(call, surfaceId: "main");
+await SendToRendererAsync(pending.Message);
+JsonNode? location = await pending.Result; // throws A2UIException on an error, a timeout or cancellation
+```
 
 ## Using the core directly (available now)
 
