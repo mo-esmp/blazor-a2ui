@@ -31,9 +31,10 @@ protocol's security model and adds rendering rules of its own.
 - **No executable code from agents.** Agents send declarative component trees and data, never HTML, JavaScript or
   executable code. No model value ever reaches raw HTML (`MarkupString`), JavaScript, an attribute name or an inline
   `style`.
-- **Pre-approved component catalog.** Only component types that the surface's catalog declares and the host registered
-  are rendered. A component of an unknown or unregistered type renders as an inert "Unsupported component" placeholder,
-  and strict validation (`A2UIValidationConfig.Strict`) rejects it. Layout options (`justify`, `align`, `variant`,
+- **Pre-approved component catalog.** Only component types that the surface's catalog declares and that have a
+  registered renderer are rendered. A type the catalog doesn't declare renders as an inert "Unsupported component"
+  placeholder, and strict validation (`A2UIValidationConfig.Strict`) rejects it. A type the catalog declares but the
+  host turned off (`options.Components.Unregister`) passes validation and also renders as the placeholder. Layout options (`justify`, `align`, `variant`,
   `fit` and the like) are enumerations mapped to fixed CSS classes; a value outside the enumeration falls back to the
   catalog default.
 - **Opening an answer never makes the browser fetch anything.** `Image`, `Video` and `AudioPlayer` never put a
