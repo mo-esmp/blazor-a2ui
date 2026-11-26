@@ -140,6 +140,87 @@ public sealed class A2UIRendererFunctionCallsTests
     }
 
     /// <summary>
+    /// Proves that a chosen id cannot be reused after its call settled, so a late response to the first call can never
+    /// settle a second one.
+    /// </summary>
+    [Fact]
+    public async Task Call_ReusedIdAfterCancel_Throws()
+    {
+        // Arrange
+        using A2UIRendererFunctionCalls calls = new();
+        using CancellationTokenSource source = new();
+        A2UIRendererFunctionCall first = calls.Call(Echo("a"), functionCallId: "i", cancellationToken: source.Token);
+        await source.CancelAsync();
+        await Should.ThrowAsync<A2UIException>(first.Result);
+
+        // Act
+        Action reuse = () => calls.Call(Echo("b"), functionCallId: "i");
+        bool late = calls.Resolve(new A2UIFunctionResponse("i", "first", null));
+
+        // Assert
+        reuse.ShouldThrow<A2UIException>().Code.ShouldBe(A2UIErrorCodes.Duplicate);
+        late.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Proves that a call whose message would be deeper than the renderer accepts is refused, and that the deepest
+    /// message the renderer accepts is allowed.
+    /// </summary>
+    [Fact]
+    public void Call_ArgsPastRendererDepth_Throws()
+    {
+        // Arrange
+        using A2UIRendererFunctionCalls calls = new();
+        static A2UICall Nested(int levels)
+        {
+            JsonNode node = "x";
+            for (int i = 0; i < levels; i++)
+            {
+                node = new JsonArray(node);
+            }
+
+            A2UICall call = new("echo") { CatalogId = ToolsId };
+            call.Args["value"] = A2UIValue.Literal(node);
+            return call;
+        }
+
+        // Act
+        // The envelope, the body, callFunction, args and the argument take four levels before the nesting starts.
+        Action tooDeep = () => calls.Call(Nested(47));
+        A2UIRendererFunctionCall deepest = calls.Call(Nested(46));
+
+        // Assert
+        tooDeep.ShouldThrow<ArgumentException>();
+        calls.IsPending(deepest.FunctionCallId).ShouldBeTrue();
+        using A2UIMessageValidator renderer = new([RendererCatalog()]);
+        renderer.Validate(deepest.Message).Errors.ShouldNotContain(e => e.Code == A2UIErrorCodes.RecursionLimitExceeded);
+        JsonObject oneDeeper = deepest.Message.DeepClone().AsObject();
+        JsonNode inner = oneDeeper["callRendererFunction"]!["callFunction"]!["args"]!["value"]!;
+        oneDeeper["callRendererFunction"]!["callFunction"]!["args"]!["value"] = new JsonArray(inner.DeepClone());
+        renderer.Validate(oneDeeper).Errors.ShouldContain(e => e.Code == A2UIErrorCodes.RecursionLimitExceeded);
+    }
+
+    /// <summary>
+    /// Proves that, wired as the README shows, a malformed response that names a pending call fails it at once with
+    /// <c>UNKNOWN_ERROR</c>.
+    /// </summary>
+    [Fact]
+    public async Task Resolve_MalformedThroughProcessor_FailsCall()
+    {
+        // Arrange
+        using A2UIRendererFunctionCalls calls = new();
+        A2UIRendererMessageProcessor processor = new() { OnRendererFunctionResponse = (r, _) => ValueTask.FromResult(calls.Resolve(r)) };
+        A2UIRendererFunctionCall pending = calls.Call(Echo("hi"), functionCallId: "c1");
+
+        // Act
+        A2UIRendererMessageResult result = await processor.ProcessLineAsync("""{"version":"1.0","rendererFunctionResponse":{"functionCallId":"c1"}}""");
+
+        // Assert
+        result.Handled.ShouldBeTrue();
+        (await Should.ThrowAsync<A2UIException>(pending.Result)).Code.ShouldBe(A2UIErrorCodes.UnknownError);
+    }
+
+    /// <summary>
     /// Proves that disposing fails every pending call and refuses new ones.
     /// </summary>
     [Fact]

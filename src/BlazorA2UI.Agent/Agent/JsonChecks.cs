@@ -6,16 +6,17 @@
 internal static class JsonChecks
 {
     /// <summary>
-    /// The deepest JSON value accepted, the same limit as a literal value.
+    /// The deepest value a message may hold, counted from the envelope at depth 0: the renderer's
+    /// <see cref="Processing.MessageProcessor.MaxMessageDepth"/>, so a message that passes here passes there too.
     /// </summary>
-    internal const int MaxDepth = A2UIValue.MaxLiteralDepth;
+    internal const int MaxDepth = Processing.MessageProcessor.MaxMessageDepth;
 
     /// <summary>
-    /// Returns whether a value can go on the wire: every number is finite and nothing is nested deeper than
-    /// <see cref="MaxDepth"/>.
+    /// Returns whether a whole message can go on the wire: every number is finite and nothing is nested deeper than
+    /// <see cref="MaxDepth"/> below the envelope.
     /// </summary>
-    /// <param name="node">The value.</param>
-    public static bool IsSendable(JsonNode? node) => IsSendable(node, 0);
+    /// <param name="message">The message, with its envelope.</param>
+    public static bool IsSendable(JsonObject message) => IsSendable(message, 0);
 
     /// <summary>
     /// Returns whether a value at a given depth can go on the wire.

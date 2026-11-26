@@ -39,6 +39,12 @@ public sealed class A2UIRendererFunctionCalls : IDisposable
     private readonly Dictionary<string, PendingCall> _pending = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// Every id a caller chose, for the life of the instance. A chosen id is never issued twice, so a late or repeated
+    /// response to an earlier call can never settle a later one. Generated ids are unique on their own.
+    /// </summary>
+    private readonly HashSet<string> _chosenIds = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Guards <see cref="_pending"/> and <see cref="_disposed"/>.
     /// </summary>
     private readonly Lock _gate = new();
@@ -110,13 +116,13 @@ public sealed class A2UIRendererFunctionCalls : IDisposable
     /// <exception cref="ArgumentNullException"><paramref name="call"/> is null.</exception>
     /// <exception cref="ArgumentException">
     /// The call has no catalog id; <paramref name="surfaceId"/> is empty; its name is not a UAX #31 identifier or starts with <c>@</c>; an argument name is
-    /// not an identifier or an argument is not finite JSON; or <paramref name="functionCallId"/> is empty.
+    /// not an identifier or an argument is not finite JSON within the renderer's message depth limit; or <paramref name="functionCallId"/> is empty.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/> is not positive or infinite.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is already cancelled.</exception>
     /// <exception cref="A2UIException">
-    /// The instance is disposed (<see cref="A2UIErrorCodes.Disposed"/>); the id is already pending
-    /// (<see cref="A2UIErrorCodes.Duplicate"/>); <see cref="A2UIRendererFunctionCallsOptions.MaxPending"/> calls are
+    /// The instance is disposed (<see cref="A2UIErrorCodes.Disposed"/>); the id was already used in this conversation,
+    /// even by a call that has settled (<see cref="A2UIErrorCodes.Duplicate"/>); <see cref="A2UIRendererFunctionCallsOptions.MaxPending"/> calls are
     /// pending (<see cref="A2UIErrorCodes.TooManyPending"/>). With catalogs: the catalog is not one of them or has no
     /// renderer function of that name (<see cref="A2UIErrorCodes.UnknownFunction"/>), or the agent may not call the
     /// function, because it is <c>rendererOnly</c> or needs user activation, or its arguments fail its schema
@@ -126,7 +132,7 @@ public sealed class A2UIRendererFunctionCalls : IDisposable
     /// <param name="call">The function call. Its arguments may hold bindings, which the renderer resolves against the surface's data model.</param>
     /// <param name="surfaceId">The surface whose data model the call runs against, or null to run it against an empty data model.</param>
     /// <param name="timeout">How long to wait for the response, or null for <see cref="A2UIRendererFunctionCallsOptions.DefaultTimeout"/>.</param>
-    /// <param name="functionCallId">The call's id, or null to generate one.</param>
+    /// <param name="functionCallId">The call's id, or null to generate a unique one. A chosen id can be used only once per instance.</param>
     /// <param name="cancellationToken">Cancels the wait: the task then fails with <see cref="A2UIErrorCodes.Cancelled"/> and a late response is ignored.</param>
     public A2UIRendererFunctionCall Call(
         A2UICall call,
@@ -172,11 +178,6 @@ public sealed class A2UIRendererFunctionCalls : IDisposable
 
         JsonObject callFunction = call.ToJson();
         JsonObject args = callFunction["args"] as JsonObject ?? new JsonObject();
-        if (!JsonChecks.IsSendable(args))
-        {
-            throw new ArgumentException($"The arguments of '{call.Name}' must be finite JSON within {JsonChecks.MaxDepth} levels.", nameof(call));
-        }
-
         string id = functionCallId ?? "call-" + Guid.NewGuid().ToString("N");
         CheckTarget(call.CatalogId, call.Name, args, id);
         JsonObject body = new();
@@ -188,6 +189,13 @@ public sealed class A2UIRendererFunctionCalls : IDisposable
         body["functionCallId"] = id;
         body["callFunction"] = callFunction;
         JsonObject message = new() { ["version"] = A2UIProtocol.Version, ["callRendererFunction"] = body };
+        if (!JsonChecks.IsSendable(message))
+        {
+            throw new ArgumentException(
+                $"The arguments of '{call.Name}' must be finite JSON that keeps the message within the renderer's {JsonChecks.MaxDepth}-level limit.",
+                nameof(call));
+        }
+
         PendingCall pending = new(call.Name);
         lock (_gate)
         {
@@ -196,9 +204,9 @@ public sealed class A2UIRendererFunctionCalls : IDisposable
                 throw new A2UIException(A2UIErrorCodes.Disposed, "The renderer function calls were disposed.") { FunctionCallId = id };
             }
 
-            if (_pending.ContainsKey(id))
+            if (_pending.ContainsKey(id) || (functionCallId is not null && _chosenIds.Contains(id)))
             {
-                throw new A2UIException(A2UIErrorCodes.Duplicate, $"A call with the id '{id}' is already pending.") { FunctionCallId = id };
+                throw new A2UIException(A2UIErrorCodes.Duplicate, $"The id '{id}' was already used for a call in this conversation.") { FunctionCallId = id };
             }
 
             if (_options.MaxPending is { } max && _pending.Count >= max)
@@ -207,6 +215,10 @@ public sealed class A2UIRendererFunctionCalls : IDisposable
             }
 
             _pending[id] = pending;
+            if (functionCallId is not null)
+            {
+                _chosenIds.Add(id);
+            }
             TimeSpan wait = timeout ?? _options.DefaultTimeout;
             if (wait != Timeout.InfiniteTimeSpan)
             {

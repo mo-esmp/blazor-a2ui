@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using BlazorA2UI.Evaluation;
 
 namespace BlazorA2UI.Agent;
 
@@ -18,7 +19,9 @@ namespace BlazorA2UI.Agent;
 /// <para>
 /// <c>action</c>, <c>error</c> and <c>rendererFunctionResponse</c> go to <see cref="OnAction"/>, <see cref="OnError"/>
 /// and <see cref="OnRendererFunctionResponse"/>. The processor checks the message, passes the callback a typed copy
-/// and replies with nothing. A callback that returns false declines the message. A declined message, or one without a
+/// and replies with nothing. A callback that returns false declines the message. A malformed
+/// <c>rendererFunctionResponse</c> that names its call reaches the callback as an
+/// <see cref="A2UIErrorCodes.UnknownError"/> response, so the call fails at once instead of timing out. A declined message, or one without a
 /// callback, is reported as not handled, so the host can pass it to the model's turn; a message without a callback is
 /// not checked.
 /// </para>
@@ -81,9 +84,7 @@ public sealed class A2UIRendererMessageProcessor(A2UIAgentFunctions? agentFuncti
             default:
                 return OnRendererFunctionResponse is null
                     ? A2UIRendererMessageResult.NotHandled
-                    : Handled(await OnRendererFunctionResponse(
-                        RendererMessageParser.ReadFunctionResponse(body, RendererMessageParser.RendererFunctionResponse),
-                        cancellationToken).ConfigureAwait(false));
+                    : Handled(await OnRendererFunctionResponse(ReadResponse(body), cancellationToken).ConfigureAwait(false));
         }
     }
 
@@ -110,6 +111,26 @@ public sealed class A2UIRendererMessageProcessor(A2UIAgentFunctions? agentFuncti
         }
 
         return ProcessAsync(message, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads a <c>rendererFunctionResponse</c>. A malformed response that still names its call becomes an
+    /// <see cref="A2UIErrorCodes.UnknownError"/> response, so the call it answers fails at once instead of timing out.
+    /// </summary>
+    /// <exception cref="A2UIValidationException">The response is malformed and has no string <c>functionCallId</c>.</exception>
+    /// <param name="body">The <c>rendererFunctionResponse</c> body.</param>
+    private static A2UIFunctionResponse ReadResponse(JsonObject body)
+    {
+        try
+        {
+            return RendererMessageParser.ReadFunctionResponse(body, RendererMessageParser.RendererFunctionResponse);
+        }
+        catch (A2UIValidationException ex) when (A2UIValues.AsString(body["functionCallId"]) is not null)
+        {
+            // The filter guarantees a string id.
+            string id = A2UIValues.AsString(body["functionCallId"])!;
+            return new A2UIFunctionResponse(id, null, new A2UIFunctionError(A2UIErrorCodes.UnknownError, $"Malformed rendererFunctionResponse: {ex.Message}"));
+        }
     }
 
     /// <summary>

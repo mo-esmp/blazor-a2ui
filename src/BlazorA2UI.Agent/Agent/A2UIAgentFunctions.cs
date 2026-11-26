@@ -190,7 +190,7 @@ public sealed class A2UIAgentFunctions
     };
 
     /// <summary>
-    /// Runs a handler, awaiting it on a background task so that a handler that ignores its token can still time out.
+    /// Runs a handler so that every exception it throws, even before its first await, ends up in the returned task.
     /// </summary>
     /// <param name="handler">The handler.</param>
     /// <param name="call">The call.</param>
@@ -334,25 +334,37 @@ public sealed class A2UIAgentFunctions
     /// <param name="cancellationToken">Cancels the handler.</param>
     private async Task<JsonObject> RunAsync(A2UIAgentFunctionCall call, Registration registration, CancellationToken cancellationToken)
     {
-        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        Task<JsonNode?> run = InvokeAsync(registration.Handler, call, linked.Token);
-        if (_timeout != System.Threading.Timeout.InfiniteTimeSpan)
+        CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task<JsonNode?> run;
+        if (_timeout == System.Threading.Timeout.InfiniteTimeSpan)
+        {
+            run = InvokeAsync(registration.Handler, call, linked.Token);
+        }
+        else
         {
             using CancellationTokenSource delay = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            Task finished = await Task.WhenAny(run, Task.Delay(_timeout, delay.Token)).ConfigureAwait(false);
+            Task deadline = Task.Delay(_timeout, delay.Token);
 
-            // Stops the timer when the handler finished first.
-            await delay.CancelAsync().ConfigureAwait(false);
+            // The clock starts first and the handler runs on the thread pool, so a handler that blocks before its
+            // first await still times out.
+            run = Task.Run(() => InvokeAsync(registration.Handler, call, linked.Token), CancellationToken.None);
+            Task finished = await Task.WhenAny(run, deadline).ConfigureAwait(false);
+
+            // Stops the timer when the handler finished first. Only this method registers on the delay token.
+            delay.Cancel();
             if (finished != run)
             {
-                await linked.CancelAsync().ConfigureAwait(false);
-
-                // The handler may still fail after its call is answered; its exception is observed so it is not lost.
+                // The handler's own cancellation callbacks may throw or block, so they run on the thread pool and
+                // never hold up or break the answer. The handler may still fail after its call is answered; its
+                // exception is observed so it is not lost.
+                _ = Task.Run(() => CancelAndDispose(linked), CancellationToken.None);
                 _ = run.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                 cancellationToken.ThrowIfCancellationRequested();
                 return Failure(call.FunctionCallId, A2UIErrorCodes.ExecutionError, $"Function '{call.Name}' timed out after {_timeout.TotalSeconds:0.###}s.");
             }
         }
+
+        using CancellationTokenSource finishedSource = linked;
 
         JsonNode? value;
         try
@@ -381,12 +393,31 @@ public sealed class A2UIAgentFunctions
             return Failure(call.FunctionCallId, A2UIErrorCodes.ExecutionError, $"Function '{call.Name}' failed.");
         }
 
-        if (!JsonChecks.IsSendable(value))
-        {
-            return Failure(call.FunctionCallId, A2UIErrorCodes.ExecutionError, $"Function '{call.Name}' returned a value that is not finite JSON within {JsonChecks.MaxDepth} levels.");
-        }
+        JsonObject reply = Success(call.FunctionCallId, JsonChecks.Detach(value));
+        return JsonChecks.IsSendable(reply)
+            ? reply
+            : Failure(call.FunctionCallId, A2UIErrorCodes.ExecutionError, $"Function '{call.Name}' returned a value that is not finite JSON within the renderer's {JsonChecks.MaxDepth}-level message limit.");
+    }
 
-        return Success(call.FunctionCallId, JsonChecks.Detach(value));
+    /// <summary>
+    /// Cancels a timed-out handler's token and disposes its source. Exceptions from the handler's cancellation
+    /// callbacks are swallowed: the call has already been answered.
+    /// </summary>
+    /// <param name="source">The handler's token source.</param>
+    private static void CancelAndDispose(CancellationTokenSource source)
+    {
+        try
+        {
+            source.Cancel();
+        }
+        catch (AggregateException)
+        {
+            // A callback the handler registered threw; the call was answered with the timeout already.
+        }
+        finally
+        {
+            source.Dispose();
+        }
     }
 
     /// <summary>

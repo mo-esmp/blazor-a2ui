@@ -209,6 +209,74 @@ public sealed class A2UIAgentFunctionsTests
     }
 
     /// <summary>
+    /// Proves that a handler that blocks before its first await still times out, because the clock starts first.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_HandlerBlocksSynchronously_TimesOut()
+    {
+        // Arrange
+        using ManualResetEventSlim release = new();
+        A2UIRendererMessageProcessor processor = new(new A2UIAgentFunctions([ToolsCatalog()]) { Timeout = TimeSpan.FromMilliseconds(30) }
+            .Add(ToolsId, "lookup", (_, _) =>
+            {
+                release.Wait(TimeSpan.FromSeconds(5));
+                return ValueTask.FromResult<JsonNode?>("late");
+            }));
+
+        // Act
+        A2UIRendererMessageResult result = await processor.ProcessAsync(AgentCall("""{"@call":"lookup","catalogId":"urn:tools","args":{"key":"k"}}"""));
+        release.Set();
+
+        // Assert
+        result.Replies.ShouldHaveSingleItem()["agentFunctionResponse"]!["error"]!["code"]!.GetValue<string>().ShouldBe(A2UIErrorCodes.ExecutionError);
+    }
+
+    /// <summary>
+    /// Proves that a handler's cancellation callback that throws cannot stop the timed-out call from being answered.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_CancellationCallbackThrows_StillAnswersTimeout()
+    {
+        // Arrange
+        A2UIRendererMessageProcessor processor = new(new A2UIAgentFunctions([ToolsCatalog()]) { Timeout = TimeSpan.FromMilliseconds(30) }
+            .Add(ToolsId, "lookup", async (_, token) =>
+            {
+                token.Register(() => throw new InvalidOperationException("The callback failed."));
+                await Task.Delay(TimeSpan.FromSeconds(1), CancellationToken.None);
+                return null;
+            }));
+
+        // Act
+        A2UIRendererMessageResult result = await processor.ProcessAsync(AgentCall("""{"@call":"lookup","catalogId":"urn:tools","args":{"key":"k"}}"""));
+
+        // Assert
+        result.Replies.ShouldHaveSingleItem()["agentFunctionResponse"]!["error"]!["code"]!.GetValue<string>().ShouldBe(A2UIErrorCodes.ExecutionError);
+    }
+
+    /// <summary>
+    /// Proves that a value that would push the reply past the renderer's message depth limit is answered with an error.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_ValueTooDeep_AnswersExecutionError()
+    {
+        // Arrange
+        JsonNode deep = 1;
+        for (int i = 0; i < 49; i++)
+        {
+            deep = new JsonArray(deep);
+        }
+
+        A2UIRendererMessageProcessor processor = new(new A2UIAgentFunctions([ToolsCatalog()]).Add(ToolsId, "lookup", (_, _) =>
+            ValueTask.FromResult<JsonNode?>(deep)));
+
+        // Act
+        A2UIRendererMessageResult result = await processor.ProcessAsync(AgentCall("""{"@call":"lookup","catalogId":"urn:tools","args":{"key":"k"}}"""));
+
+        // Assert
+        result.Replies.ShouldHaveSingleItem()["agentFunctionResponse"]!["error"]!["code"]!.GetValue<string>().ShouldBe(A2UIErrorCodes.ExecutionError);
+    }
+
+    /// <summary>
     /// Proves that cancelling processing cancels the handler and answers nothing.
     /// </summary>
     [Fact]

@@ -191,8 +191,8 @@ public sealed class A2UIRendererMessageProcessorTests
     }
 
     /// <summary>
-    /// Proves that a renderer function response reaches its callback as a value or an error, and that one with both,
-    /// neither or extra keys is rejected.
+    /// Proves that a renderer function response reaches its callback as a value or an error, that a malformed one with
+    /// a call id reaches it as an <c>UNKNOWN_ERROR</c>, and that a malformed one without a call id is rejected.
     /// </summary>
     [Fact]
     public async Task ProcessAsync_RendererFunctionResponse_ReadsValueOrError()
@@ -211,19 +211,19 @@ public sealed class A2UIRendererMessageProcessorTests
         // Act
         await processor.ProcessLineAsync("""{"version":"1.0","rendererFunctionResponse":{"functionCallId":"c1","value":null}}""");
         await processor.ProcessLineAsync("""{"version":"1.0","rendererFunctionResponse":{"functionCallId":"c2","error":{"code":"EXECUTION_ERROR","message":"m"}}}""");
-        Func<Task> both = () => processor.ProcessLineAsync("""{"version":"1.0","rendererFunctionResponse":{"functionCallId":"c3","value":1,"error":{"code":"X","message":"m"}}}""");
-        Func<Task> neither = () => processor.ProcessLineAsync("""{"version":"1.0","rendererFunctionResponse":{"functionCallId":"c3"}}""");
-        Func<Task> extra = () => processor.ProcessLineAsync("""{"version":"1.0","rendererFunctionResponse":{"functionCallId":"c3","value":1,"x":2}}""");
-        Func<Task> errorExtra = () => processor.ProcessLineAsync("""{"version":"1.0","rendererFunctionResponse":{"functionCallId":"c3","error":{"code":"X","message":"m","x":1}}}""");
+        await processor.ProcessLineAsync("""{"version":"1.0","rendererFunctionResponse":{"functionCallId":"c3","value":1,"error":{"code":"X","message":"m"}}}""");
+        await processor.ProcessLineAsync("""{"version":"1.0","rendererFunctionResponse":{"functionCallId":"c4"}}""");
+        await processor.ProcessLineAsync("""{"version":"1.0","rendererFunctionResponse":{"functionCallId":"c5","value":1,"x":2}}""");
+        await processor.ProcessLineAsync("""{"version":"1.0","rendererFunctionResponse":{"functionCallId":"c6","error":{"code":"X","message":"m","x":1}}}""");
+        Func<Task> withoutId = () => processor.ProcessLineAsync("""{"version":"1.0","rendererFunctionResponse":{"value":1}}""");
 
         // Assert
-        received.Count.ShouldBe(2);
+        received.Count.ShouldBe(6);
         received[0].IsError.ShouldBeFalse();
         received[0].Value.ShouldBeNull();
         received[1].Error.ShouldBe(new A2UIFunctionError(A2UIErrorCodes.ExecutionError, "m"));
-        await both.ShouldThrowAsync<A2UIValidationException>();
-        await neither.ShouldThrowAsync<A2UIValidationException>();
-        await extra.ShouldThrowAsync<A2UIValidationException>();
-        await errorExtra.ShouldThrowAsync<A2UIValidationException>();
+        received.Skip(2).Select(r => (r.FunctionCallId, r.Error!.Code)).ShouldBe(
+            [("c3", A2UIErrorCodes.UnknownError), ("c4", A2UIErrorCodes.UnknownError), ("c5", A2UIErrorCodes.UnknownError), ("c6", A2UIErrorCodes.UnknownError)]);
+        await withoutId.ShouldThrowAsync<A2UIValidationException>();
     }
 }
