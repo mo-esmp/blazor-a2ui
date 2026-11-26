@@ -64,7 +64,8 @@ internal sealed class A2UIConversationStore : IDisposable
     /// Starts a conversation and acquires it for the calling request.
     /// </summary>
     /// <returns>The conversation, or null when the store is full or disposed.</returns>
-    public A2UIConversation? Create()
+    /// <param name="owner">The key of the user the conversation belongs to, or null when it belongs to no one.</param>
+    public A2UIConversation? Create(string? owner = null)
     {
         lock (_gate)
         {
@@ -83,7 +84,7 @@ internal sealed class A2UIConversationStore : IDisposable
             }
 
             string id = NewId();
-            A2UIConversation conversation = new(id, _options);
+            A2UIConversation conversation = new(id, owner, _options);
             conversation.TryAcquire();
             _conversations.Add(id, conversation);
             return conversation;
@@ -93,9 +94,10 @@ internal sealed class A2UIConversationStore : IDisposable
     /// <summary>
     /// Finds a conversation and acquires it for the calling request.
     /// </summary>
-    /// <returns>The conversation, or null when the id is malformed, unknown or expired.</returns>
+    /// <returns>The conversation, or null when the id is malformed, unknown, expired or another owner's.</returns>
     /// <param name="id">The id the client sent.</param>
-    public A2UIConversation? Acquire(string id)
+    /// <param name="owner">The key of the user making the request, or null for no one.</param>
+    public A2UIConversation? Acquire(string id, string? owner = null)
     {
         if (!IsWellFormedId(id))
         {
@@ -104,7 +106,8 @@ internal sealed class A2UIConversationStore : IDisposable
 
         lock (_gate)
         {
-            if (!_conversations.TryGetValue(id, out A2UIConversation? conversation))
+            // Another owner's conversation looks unknown, so a leaked id reveals nothing.
+            if (!_conversations.TryGetValue(id, out A2UIConversation? conversation) || !string.Equals(conversation.Owner, owner, StringComparison.Ordinal))
             {
                 return null;
             }

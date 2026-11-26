@@ -52,10 +52,13 @@ internal sealed class A2UIConversation : IDisposable
     /// Creates a conversation.
     /// </summary>
     /// <param name="id">The conversation's id.</param>
+    /// <param name="owner">The key of the user the conversation belongs to, or null.</param>
     /// <param name="options">The endpoint's options.</param>
-    public A2UIConversation(string id, A2UIAgentEndpointOptions options)
+    public A2UIConversation(string id, string? owner, A2UIAgentEndpointOptions options)
     {
         Id = id;
+        Owner = owner;
+        LogId = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(id)).AsSpan(0, 6));
         _validator = new A2UIMessageValidator(options.Catalogs, options.Validation);
         RendererCalls = new A2UIRendererFunctionCalls(new A2UIRendererFunctionCallsOptions
         {
@@ -72,6 +75,16 @@ internal sealed class A2UIConversation : IDisposable
     /// Gets the conversation's id.
     /// </summary>
     public string Id { get; }
+
+    /// <summary>
+    /// Gets the key of the user the conversation belongs to, or null when it belongs to no one.
+    /// </summary>
+    public string? Owner { get; }
+
+    /// <summary>
+    /// Gets a fingerprint of the id for logs. The id itself resumes the conversation, so it never goes to a log.
+    /// </summary>
+    public string LogId { get; }
 
     /// <summary>
     /// Gets the renderer function calls the agent made in this conversation.
@@ -190,19 +203,42 @@ internal sealed class A2UIConversation : IDisposable
 
     /// <summary>
     /// Writes a renderer function call once the surface it runs against is in the mirror of the renderer's surfaces.
+    /// A call that ends, for example by timing out, while it waits for its turn to be written is not written.
     /// The call itself was checked against the catalogs when it was made; the mirror cannot check it further, because
     /// the renderer's functions run only on the renderer. Sends are serialized with <see cref="SendAsync"/>.
     /// </summary>
-    /// <returns>The problem the renderer would report, in which case nothing is written; or null once it is written.</returns>
+    /// <returns>
+    /// The problem the renderer would report, in which case nothing is written; or null once it is written or once the
+    /// call has ended without it.
+    /// </returns>
     /// <param name="call">The call.</param>
     /// <param name="surfaceId">The surface the call runs against, or null.</param>
     /// <param name="writer">Writes the response.</param>
     /// <param name="cancellationToken">Cancels the send.</param>
     public async Task<A2UIErrorReport?> SendCallAsync(A2UIRendererFunctionCall call, string? surfaceId, A2UIStreamWriter writer, CancellationToken cancellationToken)
     {
-        await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using (CancellationTokenSource ended = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+        {
+            // Stop waiting for the gate as soon as the call ends, so an abandoned call is never written. The state is
+            // always the source passed here.
+            _ = call.Result.ContinueWith(static (_, state) => CancelQuietly((CancellationTokenSource)state!), ended, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            try
+            {
+                await _sendGate.WaitAsync(ended.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+        }
+
         try
         {
+            if (call.Result.IsCompleted)
+            {
+                return null;
+            }
+
             if (surfaceId is not null)
             {
                 bool exists;
@@ -223,6 +259,22 @@ internal sealed class A2UIConversation : IDisposable
         finally
         {
             _sendGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Cancels a source that may already be disposed.
+    /// </summary>
+    /// <param name="source">The source.</param>
+    private static void CancelQuietly(CancellationTokenSource source)
+    {
+        try
+        {
+            source.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The wait already ended.
         }
     }
 

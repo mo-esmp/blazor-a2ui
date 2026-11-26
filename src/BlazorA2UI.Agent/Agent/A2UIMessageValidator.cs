@@ -122,8 +122,7 @@ public sealed class A2UIMessageValidator : IDisposable
 
     /// <summary>
     /// Takes a message that <see cref="ValidateAtomically"/> applied back out of the mirror, for a message that could
-    /// not be sent after all. A <c>deleteSurface</c> is the exception: the surface stays deleted, so later messages to
-    /// it are refused rather than sent.
+    /// not be sent after all: a created surface is removed, a deleted one is put back, and an update is undone.
     /// </summary>
     /// <param name="checkpoint">The state before the message.</param>
     internal void Restore(Checkpoint checkpoint)
@@ -146,6 +145,13 @@ public sealed class A2UIMessageValidator : IDisposable
                 });
             }
 
+            return;
+        }
+
+        if (current is null && checkpoint.Surface.IsDeleted)
+        {
+            // The message deleted the surface, so taking it back restores the surface as it was.
+            _processor.RestoreDeletedSurface(checkpoint.Surface);
             return;
         }
 

@@ -60,7 +60,8 @@ internal sealed partial class A2UIAgentEndpoint(
         }
 
         string? conversationId = context.Request.Headers[A2UIAgentEndpointExtensions.ConversationHeader];
-        A2UIConversation? conversation = conversationId is null ? store.Create() : store.Acquire(conversationId);
+        string? owner = options.ConversationOwner(context);
+        A2UIConversation? conversation = conversationId is null ? store.Create(owner) : store.Acquire(conversationId, owner);
         if (conversation is null)
         {
             (int status, string detail) = conversationId is null
@@ -121,7 +122,7 @@ internal sealed partial class A2UIAgentEndpoint(
             }
             catch (Exception ex)
             {
-                LogTurnFailed(logger, ex, conversation.Id);
+                LogTurnFailed(logger, ex, conversation.LogId);
                 await FailAsync(context, writer).ConfigureAwait(false);
             }
         }
@@ -167,7 +168,7 @@ internal sealed partial class A2UIAgentEndpoint(
             {
                 if (!conversation.RendererCalls.Resolve(response))
                 {
-                    LogUnmatchedResponse(logger, conversation.Id);
+                    LogUnmatchedResponse(logger, conversation.LogId);
                 }
 
                 return ValueTask.FromResult(true);
@@ -297,15 +298,15 @@ internal sealed partial class A2UIAgentEndpoint(
     /// </summary>
     /// <param name="logger">The logger.</param>
     /// <param name="exception">The exception.</param>
-    /// <param name="conversationId">The conversation's id.</param>
-    [LoggerMessage(EventId = 1, Level = LogLevel.Error, Message = "The A2UI agent's turn failed in conversation {ConversationId}.")]
-    private static partial void LogTurnFailed(ILogger logger, Exception exception, string conversationId);
+    /// <param name="conversation">The conversation's fingerprint; the id itself never goes to a log.</param>
+    [LoggerMessage(EventId = 1, Level = LogLevel.Error, Message = "The A2UI agent's turn failed in conversation {Conversation}.")]
+    private static partial void LogTurnFailed(ILogger logger, Exception exception, string conversation);
 
     /// <summary>
     /// Logs a renderer function response that matches no pending call: unknown, late or a duplicate.
     /// </summary>
     /// <param name="logger">The logger.</param>
-    /// <param name="conversationId">The conversation's id.</param>
-    [LoggerMessage(EventId = 2, Level = LogLevel.Debug, Message = "A rendererFunctionResponse in conversation {ConversationId} matched no pending call and was ignored.")]
-    private static partial void LogUnmatchedResponse(ILogger logger, string conversationId);
+    /// <param name="conversation">The conversation's fingerprint; the id itself never goes to a log.</param>
+    [LoggerMessage(EventId = 2, Level = LogLevel.Debug, Message = "A rendererFunctionResponse in conversation {Conversation} matched no pending call and was ignored.")]
+    private static partial void LogUnmatchedResponse(ILogger logger, string conversation);
 }

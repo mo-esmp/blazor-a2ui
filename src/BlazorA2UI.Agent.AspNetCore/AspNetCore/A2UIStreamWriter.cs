@@ -1,6 +1,7 @@
 ﻿using System.Buffers;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Net.Http.Headers;
 
 namespace BlazorA2UI.Agent.AspNetCore;
 
@@ -52,11 +53,31 @@ internal sealed class A2UIStreamWriter
     public string MediaType => IsEventStream ? EventStreamMediaType : A2UIMessageWriter.MediaType;
 
     /// <summary>
-    /// Returns whether a request asks for server-sent events in its <c>Accept</c> header.
+    /// Returns whether a request prefers server-sent events in its <c>Accept</c> header: it names them with a quality
+    /// above zero, and at least as high as JSON Lines gets, by name or through a wildcard.
     /// </summary>
     /// <param name="request">The request.</param>
-    public static bool WantsEventStream(HttpRequest request) =>
-        request.GetTypedHeaders().Accept.Any(a => string.Equals(a.MediaType.Value, EventStreamMediaType, StringComparison.OrdinalIgnoreCase));
+    public static bool WantsEventStream(HttpRequest request)
+    {
+        double eventStream = 0;
+        double jsonLines = 0;
+        foreach (MediaTypeHeaderValue accept in request.GetTypedHeaders().Accept)
+        {
+            double quality = accept.Quality ?? 1;
+            string? mediaType = accept.MediaType.Value;
+            if (string.Equals(mediaType, EventStreamMediaType, StringComparison.OrdinalIgnoreCase))
+            {
+                eventStream = Math.Max(eventStream, quality);
+            }
+            else if (string.Equals(mediaType, A2UIMessageWriter.MediaType, StringComparison.OrdinalIgnoreCase)
+                || mediaType is "*/*" || string.Equals(mediaType, "application/*", StringComparison.OrdinalIgnoreCase))
+            {
+                jsonLines = Math.Max(jsonLines, quality);
+            }
+        }
+
+        return eventStream > 0 && eventStream >= jsonLines;
+    }
 
     /// <summary>
     /// Writes an A2UI message.

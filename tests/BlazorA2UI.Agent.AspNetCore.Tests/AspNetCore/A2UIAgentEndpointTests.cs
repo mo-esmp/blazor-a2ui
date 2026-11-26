@@ -517,9 +517,12 @@ public sealed class A2UIAgentEndpointTests
             throw new InvalidOperationException("boom");
         });
 
-        // Act
-        using HttpResponseMessage response = await host.SendAsync(TestAgentHost.Request("""{"text":"Hi"}"""));
-        Func<Task> read = () => TestAgentHost.ReadLinesAsync(response);
+        // Act. The abort can reach the client before the headers or after them, so both are read together.
+        Func<Task> read = async () =>
+        {
+            using HttpResponseMessage response = await host.SendAsync(TestAgentHost.Request("""{"text":"Hi"}"""));
+            await TestAgentHost.ReadLinesAsync(response);
+        };
 
         // Assert
         await Should.ThrowAsync<Exception>(read);
@@ -558,6 +561,81 @@ public sealed class A2UIAgentEndpointTests
 
         // Assert
         act.ShouldThrow<InvalidOperationException>();
+    }
+
+    /// <summary>
+    /// Proves that a renderer function timeout too long for a timer fails at startup.
+    /// </summary>
+    [Fact]
+    public void MapA2UIAgent_TimeoutTooLong_Throws()
+    {
+        // Arrange
+        Microsoft.AspNetCore.Builder.WebApplication app = Microsoft.AspNetCore.Builder.WebApplication.CreateSlimBuilder().Build();
+
+        // Act
+        Action act = () => app.MapA2UIAgent("/a2ui", (_, _) => Task.CompletedTask, options =>
+        {
+            options.Catalogs.Add(BasicCatalog.Create());
+            options.RendererFunctionTimeout = TimeSpan.FromDays(60);
+        });
+
+        // Assert
+        act.ShouldThrow<InvalidOperationException>();
+    }
+
+    /// <summary>
+    /// Proves that a conversation belongs to the user who started it: another user gets 404, as for an unknown id.
+    /// </summary>
+    [Fact]
+    public async Task Post_OtherOwner_Returns404()
+    {
+        // Arrange
+        await using TestAgentHost host = await TestAgentHost.StartAsync(
+            (_, _) => Task.CompletedTask,
+            options => options.ConversationOwner = context => context.Request.Headers["X-User"].FirstOrDefault());
+        HttpRequestMessage start = TestAgentHost.Request("""{"text":"Hi"}""");
+        start.Headers.Add("X-User", "alice");
+        using HttpResponseMessage first = await host.SendAsync(start);
+        string id = first.Headers.GetValues(A2UIAgentEndpointExtensions.ConversationHeader).Single();
+        HttpRequestMessage asBob = TestAgentHost.Request("""{"text":"Hi"}""", id);
+        asBob.Headers.Add("X-User", "bob");
+        HttpRequestMessage asAlice = TestAgentHost.Request("""{"text":"Hi"}""", id);
+        asAlice.Headers.Add("X-User", "alice");
+
+        // Act
+        using HttpResponseMessage bob = await host.SendAsync(asBob);
+        using HttpResponseMessage alice = await host.SendAsync(asAlice);
+
+        // Assert
+        bob.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        alice.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    /// <summary>
+    /// Proves that the <c>Accept</c> header picks the format by quality: server-sent events only when the client
+    /// prefers them, never when it gives them a quality of zero.
+    /// </summary>
+    /// <param name="accept">The <c>Accept</c> header.</param>
+    /// <param name="expected">The media type of the response.</param>
+    [Theory]
+    [InlineData("text/event-stream", "text/event-stream")]
+    [InlineData("application/jsonl, text/event-stream;q=0", "application/jsonl")]
+    [InlineData("application/jsonl;q=0.5, text/event-stream", "text/event-stream")]
+    [InlineData("text/event-stream;q=0.5, application/jsonl", "application/jsonl")]
+    [InlineData("text/event-stream;q=0.5, */*;q=0.1", "text/event-stream")]
+    [InlineData("*/*", "application/jsonl")]
+    public async Task Post_AcceptQuality_PicksFormat(string accept, string expected)
+    {
+        // Arrange
+        await using TestAgentHost host = await TestAgentHost.StartAsync((_, _) => Task.CompletedTask);
+        HttpRequestMessage request = TestAgentHost.Request("""{"text":"Hi"}""");
+        request.Headers.TryAddWithoutValidation("Accept", accept).ShouldBeTrue();
+
+        // Act
+        using HttpResponseMessage response = await host.SendAsync(request);
+
+        // Assert. A successful response always has a content type.
+        response.Content.Headers.ContentType!.MediaType.ShouldBe(expected);
     }
 
     /// <summary>

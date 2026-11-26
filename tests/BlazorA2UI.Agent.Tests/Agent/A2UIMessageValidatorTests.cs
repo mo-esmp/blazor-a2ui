@@ -426,6 +426,27 @@ public sealed class A2UIMessageValidatorTests
     }
 
     /// <summary>
+    /// Proves that <see cref="A2UIMessageValidator.Restore"/> takes a <c>deleteSurface</c> back, so the surface can be
+    /// updated again.
+    /// </summary>
+    [Fact]
+    public void Restore_Delete_PutsSurfaceBack()
+    {
+        // Arrange
+        using A2UIMessageValidator validator = new();
+        validator.Validate(A2UIMessages.CreateSurface("main", new Text { Content = "Hi" }));
+        validator.ValidateAtomically(A2UIMessages.DeleteSurface("main"), out A2UIMessageValidator.Checkpoint deleted);
+
+        // Act
+        validator.Restore(deleted);
+
+        // Assert
+        validator.Surfaces.ContainsKey("main").ShouldBeTrue();
+        validator.Validate(A2UIMessages.UpdateDataModel("main", "/name", "Ada")).IsValid.ShouldBeTrue();
+        validator.Validate(A2UIMessages.CreateSurface("main", new Text { Content = "Again" })).IsValid.ShouldBeFalse();
+    }
+
+    /// <summary>
     /// A component the basic catalog does not define.
     /// </summary>
     private sealed class Custom : A2UIComponent

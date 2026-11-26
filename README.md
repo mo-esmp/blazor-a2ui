@@ -368,15 +368,16 @@ messages:
 ```
 
 **The response** streams the agent's messages as JSON Lines (`application/jsonl`), one message per
-line, each flushed as soon as it is ready. A client that sends `Accept: text/event-stream` gets
-server-sent events instead: `a2ui` events with messages, `text` events with the model's text, and
+line, each flushed as soon as it is ready. A client that prefers `text/event-stream` in its `Accept`
+header (by quality, over `application/jsonl`) gets server-sent events instead: `a2ui` events with messages, `text` events with the model's text, and
 an `error` event if the turn fails. The turn ends when the response ends.
 
 - **Conversations.** The first response carries a new id in the `A2UI-Conversation` header. Send it
   back with each later request. The server keeps the conversation's surfaces, so every message is
   checked the way the renderer will check it, and its pending renderer function calls. Idle
   conversations expire after `ConversationIdleTimeout` (30 minutes). An unknown or expired id gets
-  404, and a full store (`MaxConversations`, 10,000) gets 503.
+  404, and a full store (`MaxConversations`, 10,000) gets 503. A conversation started by a signed-in
+  user belongs to that user (`ConversationOwner`), and anyone else gets 404 for its id.
 - **Renderer messages.** `callAgentFunction` is answered on the response without a turn, and
   `rendererFunctionResponse` settles the call it answers. `action` and `error` start a turn, as
   text does. A second turn while one is running in the same conversation gets 409.
