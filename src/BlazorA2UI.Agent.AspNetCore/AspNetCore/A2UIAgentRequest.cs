@@ -72,6 +72,12 @@ internal sealed record A2UIAgentRequest(string? Text, IReadOnlyList<JsonObject> 
                         _ = RendererMessageParser.ReadError(envelopeBody);
                         startsTurn = true;
                         break;
+                    case RendererMessageParser.CallAgentFunction when A2UIValues.AsString(envelopeBody["functionCallId"]) is not { Length: > 0 }:
+                        // Any other problem with the call is answered with an error response, which needs this id.
+                        throw new A2UIValidationException("callAgentFunction needs a non-empty string functionCallId, so it can be answered.");
+                    case RendererMessageParser.RendererFunctionResponse when A2UIValues.AsString(envelopeBody["functionCallId"]) is null:
+                        // A malformed response that names its call fails that call; one that names none cannot be matched.
+                        throw new A2UIValidationException("rendererFunctionResponse needs a string functionCallId.");
                 }
             }
             catch (A2UIValidationException ex)

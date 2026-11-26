@@ -143,6 +143,36 @@ public sealed class A2UIAgentEndpointTests
     }
 
     /// <summary>
+    /// Proves that a message the renderer would apply in part is not kept in the conversation's mirror, so the agent
+    /// can send a corrected one for the same surface.
+    /// </summary>
+    [Fact]
+    public async Task SendAsync_RejectedCreateSurface_CanBeSentAgain()
+    {
+        // Arrange
+        JsonObject broken = A2UIMessages.CreateSurface("main", new Text { Content = "Hi" });
+
+        // The builder always writes the components, so the first one is there.
+        broken["createSurface"]!["components"]![0]!["component"] = "Chart";
+        Exception? thrown = null;
+        await using TestAgentHost host = await TestAgentHost.StartAsync(
+            async (turn, ct) =>
+            {
+                thrown = await Should.ThrowAsync<A2UIValidationException>(() => turn.SendAsync(broken, ct));
+                await turn.SendAsync(A2UIMessages.CreateSurface("main", new Text { Content = "Hi" }), ct);
+            },
+            options => options.Validation = A2UIValidationConfig.Strict);
+
+        // Act
+        using HttpResponseMessage response = await host.SendAsync(TestAgentHost.Request("""{"text":"Hi"}"""));
+        List<JsonObject> lines = await TestAgentHost.ReadLinesAsync(response);
+
+        // Assert
+        thrown.ShouldNotBeNull();
+        lines.Single().ContainsKey("createSurface").ShouldBeTrue();
+    }
+
+    /// <summary>
     /// Proves that only UI messages can be sent directly.
     /// </summary>
     [Fact]
@@ -234,6 +264,8 @@ public sealed class A2UIAgentEndpointTests
     [InlineData("""{"messages":[1]}""", "Message 1 must be a JSON object.")]
     [InlineData("""{"messages":[{"version":"1.0","showChart":{}}]}""", "Message 1 is not a valid renderer message")]
     [InlineData("""{"messages":[{"version":"1.0","action":{"name":"submit"}}]}""", "Message 1 is not a valid renderer message")]
+    [InlineData("""{"messages":[{"version":"1.0","callAgentFunction":{"call":"lookup"}}]}""", "Message 1 is not a valid renderer message")]
+    [InlineData("""{"messages":[{"version":"1.0","rendererFunctionResponse":{"value":1}}]}""", "Message 1 is not a valid renderer message")]
     [InlineData("""{"text":"\ud800"}""", "The body has a string that is not valid Unicode.")]
     public async Task Post_MalformedBody_Returns400(string body, string detail)
     {
@@ -384,6 +416,44 @@ public sealed class A2UIAgentEndpointTests
     }
 
     /// <summary>
+    /// Proves that a renderer function call the renderer would reject, here for a surface that does not exist, is
+    /// refused before it is sent and does not stay pending.
+    /// </summary>
+    [Fact]
+    public async Task CallRendererFunctionAsync_UnknownSurface_ThrowsAndSendsNothing()
+    {
+        // Arrange
+        Catalog tools = ToolsCatalog();
+        A2UIValidationException? first = null;
+        A2UIValidationException? second = null;
+        await using TestAgentHost host = await TestAgentHost.StartAsync(
+            async (turn, ct) =>
+            {
+                // Only one call may be pending, so the second is refused the same way only if the first was dropped.
+                first = await Should.ThrowAsync<A2UIValidationException>(
+                    () => turn.CallRendererFunctionAsync(new A2UICall("getCity") { CatalogId = ToolsId }, "missing", cancellationToken: ct));
+                second = await Should.ThrowAsync<A2UIValidationException>(
+                    () => turn.CallRendererFunctionAsync(new A2UICall("getCity") { CatalogId = ToolsId }, "missing", cancellationToken: ct));
+            },
+            options =>
+            {
+                options.Catalogs.Add(tools);
+                options.MaxPendingRendererCalls = 1;
+            });
+
+        // Act
+        using HttpResponseMessage response = await host.SendAsync(TestAgentHost.Request("""{"text":"Where am I?"}"""));
+        List<JsonObject> lines = await TestAgentHost.ReadLinesAsync(response);
+
+        // Assert
+        first.ShouldNotBeNull();
+        first.FunctionCallId.ShouldNotBeNull();
+        second.ShouldNotBeNull();
+        second.Code.ShouldBe(first.Code);
+        lines.ShouldBeEmpty();
+    }
+
+    /// <summary>
     /// Proves that a second turn in a conversation is refused with 409 while the first is still running.
     /// </summary>
     [Fact]
@@ -488,6 +558,26 @@ public sealed class A2UIAgentEndpointTests
 
         // Assert
         act.ShouldThrow<InvalidOperationException>();
+    }
+
+    /// <summary>
+    /// Proves that mapping an endpoint with two catalogs that share an id fails at startup.
+    /// </summary>
+    [Fact]
+    public void MapA2UIAgent_DuplicateCatalogIds_Throws()
+    {
+        // Arrange
+        Microsoft.AspNetCore.Builder.WebApplication app = Microsoft.AspNetCore.Builder.WebApplication.CreateSlimBuilder().Build();
+
+        // Act
+        Action act = () => app.MapA2UIAgent("/a2ui", (_, _) => Task.CompletedTask, options =>
+        {
+            options.Catalogs.Add(BasicCatalog.Create());
+            options.Catalogs.Add(BasicCatalog.Create());
+        });
+
+        // Assert
+        act.ShouldThrow<InvalidOperationException>().Message.ShouldContain("two catalogs");
     }
 
     /// <summary>

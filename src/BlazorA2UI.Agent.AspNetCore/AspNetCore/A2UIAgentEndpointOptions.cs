@@ -78,6 +78,11 @@ public sealed class A2UIAgentEndpointOptions
             throw new InvalidOperationException("The A2UI agent endpoint's catalogs may not contain null.");
         }
 
+        if (Catalogs.GroupBy(c => c.CatalogId, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1) is { } duplicate)
+        {
+            throw new InvalidOperationException($"The A2UI agent endpoint has two catalogs with the id '{duplicate.Key}'.");
+        }
+
         if (MaxRequestBodySize <= 0 || MaxMessagesPerRequest <= 0 || MaxConversations <= 0 || MaxPendingRendererCalls <= 0)
         {
             throw new InvalidOperationException("The A2UI agent endpoint's limits must be positive.");

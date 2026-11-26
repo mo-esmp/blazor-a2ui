@@ -29,6 +29,11 @@ internal sealed class A2UIConversation : IDisposable
     private readonly SemaphoreSlim _turnGate = new(1, 1);
 
     /// <summary>
+    /// Serializes the agent's sends, so each message is checked, written and kept in the mirror as one step.
+    /// </summary>
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
+
+    /// <summary>
     /// How many requests are using the conversation.
     /// </summary>
     private int _activeRequests;
@@ -138,17 +143,86 @@ internal sealed class A2UIConversation : IDisposable
     public void EndTurn() => _turnGate.Release();
 
     /// <summary>
-    /// Checks a message the agent is about to send against the mirror of the renderer's surfaces, and applies it to
-    /// the mirror when it passes.
+    /// Checks a message the way the renderer will, writes it, and keeps it in the mirror of the renderer's surfaces only
+    /// when both succeed. Sends are serialized, so the mirror applies messages in the order the client receives them.
     /// </summary>
-    /// <returns>The first problem the renderer would report, or null when it would accept the message.</returns>
+    /// <returns>The first problem the renderer would report, in which case nothing is written; or null once it is written.</returns>
     /// <param name="message">The message. It is not changed.</param>
-    public A2UIErrorReport? Check(JsonObject message)
+    /// <param name="writer">Writes the response.</param>
+    /// <param name="cancellationToken">Cancels the send.</param>
+    public async Task<A2UIErrorReport?> SendAsync(JsonObject message, A2UIStreamWriter writer, CancellationToken cancellationToken)
     {
-        lock (_validatorGate)
+        await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            A2UIValidationResult result = _validator.Validate(message.DeepClone());
-            return result.IsValid ? null : result.Errors[0];
+            A2UIMessageValidator.Checkpoint checkpoint;
+            lock (_validatorGate)
+            {
+                A2UIValidationResult result = _validator.ValidateAtomically(message.DeepClone().AsObject(), out checkpoint);
+                if (!result.IsValid)
+                {
+                    return result.Errors[0];
+                }
+            }
+
+            try
+            {
+                await writer.WriteMessageAsync(message, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // The client did not get the message whole, so the mirror must not keep it.
+                lock (_validatorGate)
+                {
+                    _validator.Restore(checkpoint);
+                }
+
+                throw;
+            }
+
+            return null;
+        }
+        finally
+        {
+            _sendGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Writes a renderer function call once the surface it runs against is in the mirror of the renderer's surfaces.
+    /// The call itself was checked against the catalogs when it was made; the mirror cannot check it further, because
+    /// the renderer's functions run only on the renderer. Sends are serialized with <see cref="SendAsync"/>.
+    /// </summary>
+    /// <returns>The problem the renderer would report, in which case nothing is written; or null once it is written.</returns>
+    /// <param name="call">The call.</param>
+    /// <param name="surfaceId">The surface the call runs against, or null.</param>
+    /// <param name="writer">Writes the response.</param>
+    /// <param name="cancellationToken">Cancels the send.</param>
+    public async Task<A2UIErrorReport?> SendCallAsync(A2UIRendererFunctionCall call, string? surfaceId, A2UIStreamWriter writer, CancellationToken cancellationToken)
+    {
+        await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (surfaceId is not null)
+            {
+                bool exists;
+                lock (_validatorGate)
+                {
+                    exists = _validator.Surfaces.ContainsKey(surfaceId);
+                }
+
+                if (!exists)
+                {
+                    return new A2UIErrorReport(A2UIErrorCodes.InvalidFunctionCall, $"Surface '{surfaceId}' does not exist.", null, call.FunctionCallId, null);
+                }
+            }
+
+            await writer.WriteMessageAsync(call.Message, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+        finally
+        {
+            _sendGate.Release();
         }
     }
 

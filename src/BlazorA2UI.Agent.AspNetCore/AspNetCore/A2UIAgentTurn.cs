@@ -103,12 +103,10 @@ public sealed class A2UIAgentTurn
                 nameof(message));
         }
 
-        if (_conversation.Check(message) is { } error)
+        if (await _conversation.SendAsync(message, _writer, cancellationToken).ConfigureAwait(false) is { } error)
         {
             throw new A2UIValidationException($"The renderer would reject the message: {error.Code}: {error.Message}", error.Code);
         }
-
-        await _writer.WriteMessageAsync(message, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -128,6 +126,9 @@ public sealed class A2UIAgentTurn
     /// Calls a function on the renderer and waits for its value. The renderer sends the response in a later request
     /// of the same conversation, while this turn is still streaming.
     /// </summary>
+    /// <exception cref="A2UIValidationException">
+    /// The surface does not exist, so the renderer would reject the call; nothing is sent.
+    /// </exception>
     /// <exception cref="A2UIException">
     /// The call is refused before it is sent (see <see cref="A2UIRendererFunctionCalls.Call"/>), or the renderer
     /// answers with an error, or it times out or is cancelled.
@@ -144,7 +145,26 @@ public sealed class A2UIAgentTurn
         CancellationToken cancellationToken = default)
     {
         A2UIRendererFunctionCall pending = _conversation.RendererCalls.Call(call, surfaceId, timeout, cancellationToken: cancellationToken);
-        await _writer.WriteMessageAsync(pending.Message, cancellationToken).ConfigureAwait(false);
+        A2UIErrorReport? error;
+        try
+        {
+            error = await _conversation.SendCallAsync(pending, surfaceId, _writer, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            Abandon(pending, A2UIErrorCodes.Cancelled, "The call could not be sent.");
+            throw;
+        }
+
+        if (error is not null)
+        {
+            Abandon(pending, error.Code, error.Message);
+            throw new A2UIValidationException($"The renderer would reject the call: {error.Code}: {error.Message}", error.Code)
+            {
+                FunctionCallId = pending.FunctionCallId,
+            };
+        }
+
         return await pending.Result.ConfigureAwait(false);
     }
 
@@ -179,6 +199,21 @@ public sealed class A2UIAgentTurn
     }
 
     /// <summary>
+    /// Fails a renderer function call that was not sent, so it stops counting as pending and does not wait for its
+    /// timeout.
+    /// </summary>
+    /// <param name="pending">The call.</param>
+    /// <param name="code">The error code to fail it with.</param>
+    /// <param name="message">The error message.</param>
+    private void Abandon(A2UIRendererFunctionCall pending, string code, string message)
+    {
+        _conversation.RendererCalls.Resolve(new A2UIFunctionResponse(pending.FunctionCallId, null, new A2UIFunctionError(code, message)));
+
+        // Nothing awaits the failed result, so mark its exception as observed.
+        _ = pending.Result.Exception;
+    }
+
+    /// <summary>
     /// Returns whether a message is one of the four UI messages.
     /// </summary>
     /// <param name="message">The message.</param>
@@ -210,13 +245,11 @@ public sealed class A2UIAgentTurn
                     errors.Add(new A2UIErrorPart("Only createSurface, updateComponents, updateDataModel and deleteSurface messages can be sent; the message was not sent."));
                     break;
                 case A2UIMessagePart { Message: JsonObject message }:
-                    if (_conversation.Check(message) is { } problem)
+                    if (await _conversation.SendAsync(message, _writer, cancellationToken).ConfigureAwait(false) is { } problem)
                     {
                         errors.Add(new A2UIErrorPart($"The renderer would reject an A2UI message, so it was not sent: {problem.Code}: {problem.Message}"));
-                        break;
                     }
 
-                    await _writer.WriteMessageAsync(message, cancellationToken).ConfigureAwait(false);
                     break;
             }
         }

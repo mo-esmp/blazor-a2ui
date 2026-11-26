@@ -157,6 +157,23 @@ public sealed class Surface
     internal Dictionary<string, ComponentInstance> SnapshotComponents() => new(_components, StringComparer.Ordinal);
 
     /// <summary>
+    /// Puts back a component map taken with <see cref="SnapshotComponents"/>, dropping the components added since,
+    /// clears the reported errors, and raises <see cref="Changed"/>.
+    /// </summary>
+    /// <param name="components">The component map to restore.</param>
+    internal void RestoreComponents(Dictionary<string, ComponentInstance> components)
+    {
+        _components.Clear();
+        foreach ((string id, ComponentInstance component) in components)
+        {
+            _components[id] = component;
+        }
+
+        _reportedErrors.Clear();
+        NotifyChanged();
+    }
+
+    /// <summary>
     /// Raises <see cref="Changed"/> (coalesced while updates are batched).
     /// </summary>
     public void NotifyChanged()
