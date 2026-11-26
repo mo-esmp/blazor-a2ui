@@ -102,7 +102,7 @@ public sealed class A2UIRendererMessageProcessor(A2UIAgentFunctions? agentFuncti
         JsonNode? message;
         try
         {
-            message = JsonNode.Parse(line, documentOptions: new JsonDocumentOptions { MaxDepth = JsonChecks.MaxDepth + 2 });
+            message = JsonNode.Parse(line, documentOptions: new JsonDocumentOptions { MaxDepth = JsonChecks.MaxDepth + 2, AllowDuplicateProperties = false });
         }
         catch (JsonException ex)
         {

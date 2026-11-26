@@ -1,4 +1,5 @@
 ﻿using BlazorA2UI.Evaluation;
+using BlazorA2UI.Unicode;
 
 namespace BlazorA2UI.Agent;
 
@@ -164,9 +165,17 @@ internal static class RendererMessageParser
 
             foreach ((string key, JsonNode? value) in meta)
             {
-                if (key != "extensions" || value is not JsonObject)
+                if (key != "extensions" || value is not JsonObject extensions)
                 {
                     throw Invalid(Action, "metadata", "may only hold an 'extensions' object");
+                }
+
+                foreach ((string extensionKey, JsonNode? _) in extensions)
+                {
+                    if (!Uax31.IsIdentifier(extensionKey))
+                    {
+                        throw Invalid(Action, "metadata", $"has the extension key '{extensionKey}', which is not a UAX #31 identifier");
+                    }
                 }
             }
 

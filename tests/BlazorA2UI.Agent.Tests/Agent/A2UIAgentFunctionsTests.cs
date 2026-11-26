@@ -155,6 +155,26 @@ public sealed class A2UIAgentFunctionsTests
     }
 
     /// <summary>
+    /// Proves that a <see cref="A2UIAgentFunctions.FunctionFailed"/> subscriber that throws cannot stop the call from
+    /// being answered.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_FailedSubscriberThrows_StillAnswers()
+    {
+        // Arrange
+        A2UIAgentFunctions functions = new A2UIAgentFunctions([ToolsCatalog()]).Add(ToolsId, "lookup", (_, _) =>
+            throw new InvalidOperationException("Boom."));
+        functions.FunctionFailed += (_, _) => throw new InvalidOperationException("The logger is down.");
+        A2UIRendererMessageProcessor processor = new(functions);
+
+        // Act
+        A2UIRendererMessageResult result = await processor.ProcessAsync(AgentCall("""{"@call":"lookup","catalogId":"urn:tools","args":{"key":"k"}}"""));
+
+        // Assert
+        result.Replies.ShouldHaveSingleItem()["agentFunctionResponse"]!["error"]!["code"]!.GetValue<string>().ShouldBe(A2UIErrorCodes.ExecutionError);
+    }
+
+    /// <summary>
     /// Proves that a handler that runs past the timeout is answered with <c>EXECUTION_ERROR</c> and its token is
     /// cancelled.
     /// </summary>

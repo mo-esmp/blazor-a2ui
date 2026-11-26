@@ -89,6 +89,8 @@ public sealed class A2UIRendererMessageProcessorTests
     [InlineData("""{"version":"1.0","action":{},"error":{}}""")]
     [InlineData("""{"version":"1.0","createSurface":{}}""")]
     [InlineData("""{"version":"1.0","error":"oops"}""")]
+    [InlineData("""{"version":"1.0","version":"1.0","error":{"code":"X","message":"m","surfaceId":"s"}}""")]
+    [InlineData("""{"version":"1.0","error":{"code":"X","code":"Y","message":"m","surfaceId":"s"}}""")]
     public async Task ProcessAsync_NotOneRendererMessage_Throws(string json)
     {
         // Arrange
@@ -128,6 +130,7 @@ public sealed class A2UIRendererMessageProcessorTests
     [InlineData("""{"name":1,"surfaceId":"s","sourceComponentId":"c","timestamp":"2026-11-26T10:15:00Z","context":{}}""")]
     [InlineData("""{"name":"a","surfaceId":"s","sourceComponentId":"c","timestamp":"2026-11-26T10:15:00Z","context":{},"userMessage":2}""")]
     [InlineData("""{"name":"a","surfaceId":"s","sourceComponentId":"c","timestamp":"2026-11-26T10:15:00Z","context":{},"metadata":{"other":{}}}""")]
+    [InlineData("""{"name":"a","surfaceId":"s","sourceComponentId":"c","timestamp":"2026-11-26T10:15:00Z","context":{},"metadata":{"extensions":{"com-example":1}}}""")]
     public async Task ProcessAsync_MalformedAction_Throws(string body)
     {
         // Arrange

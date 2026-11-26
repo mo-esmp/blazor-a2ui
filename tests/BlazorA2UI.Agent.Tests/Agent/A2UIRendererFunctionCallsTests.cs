@@ -205,6 +205,7 @@ public sealed class A2UIRendererFunctionCallsTests
             () => calls.Call(badArg),
             () => calls.Call(notFinite),
             () => calls.Call(Echo("x"), functionCallId: string.Empty),
+            () => calls.Call(Echo("x"), surfaceId: string.Empty),
             () => calls.Call(Echo("x"), timeout: TimeSpan.Zero),
         ];
 
@@ -246,6 +247,63 @@ public sealed class A2UIRendererFunctionCallsTests
         // Assert
         make.ShouldThrow<A2UIException>().Code.ShouldBe(code);
         calls.PendingCount.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// Proves that, given the agent's catalogs, a call nested in the arguments is refused when the renderer would
+    /// refuse it, and that a nested call the agent may make is accepted.
+    /// </summary>
+    /// <param name="nested">The nested <c>@call</c> name.</param>
+    /// <param name="accepted">Whether the call is accepted.</param>
+    [Theory]
+    [InlineData("echo", true)]
+    [InlineData("secret", false)]
+    [InlineData("gesture", false)]
+    [InlineData("lookup", false)]
+    [InlineData("missing", false)]
+    [InlineData("@index", false)]
+    public void Call_WithCatalogsNestedCall_ChecksIt(string nested, bool accepted)
+    {
+        // Arrange
+        Catalog catalog = RendererCatalog();
+        A2UIAgentFunctions agentFunctions = new A2UIAgentFunctions([catalog]).Add(ToolsId, "lookup", (_, _) => ValueTask.FromResult<JsonNode?>(null));
+        using A2UIRendererFunctionCalls calls = new(new A2UIRendererFunctionCallsOptions { Catalogs = [catalog], AgentFunctions = agentFunctions });
+        A2UICall inner = new(nested);
+        inner.Args["value"] = "x";
+        A2UICall call = Echo(inner);
+
+        // Act
+        Action make = () => calls.Call(call);
+
+        // Assert
+        if (accepted)
+        {
+            make.ShouldNotThrow();
+        }
+        else
+        {
+            make.ShouldThrow<A2UIException>().Code.ShouldBe(A2UIErrorCodes.InvalidFunctionCall);
+        }
+    }
+
+    /// <summary>
+    /// Proves that a catalog for another protocol version is not used, as the renderer does not use it.
+    /// </summary>
+    [Fact]
+    public void Call_CatalogForOtherVersion_Throws()
+    {
+        // Arrange
+        Catalog current = RendererCatalog();
+        Catalog old = new("urn:old", [], current.Functions.Values, "0.9");
+        using A2UIRendererFunctionCalls calls = new(new A2UIRendererFunctionCallsOptions { Catalogs = [old] });
+        A2UICall call = new("echo") { CatalogId = "urn:old" };
+        call.Args["value"] = "x";
+
+        // Act
+        Action make = () => calls.Call(call);
+
+        // Assert
+        make.ShouldThrow<A2UIException>().Code.ShouldBe(A2UIErrorCodes.UnknownFunction);
     }
 
     /// <summary>

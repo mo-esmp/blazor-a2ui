@@ -109,7 +109,7 @@ public sealed class A2UIRendererFunctionCalls : IDisposable
     /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="call"/> is null.</exception>
     /// <exception cref="ArgumentException">
-    /// The call has no catalog id; its name is not a UAX #31 identifier or starts with <c>@</c>; an argument name is
+    /// The call has no catalog id; <paramref name="surfaceId"/> is empty; its name is not a UAX #31 identifier or starts with <c>@</c>; an argument name is
     /// not an identifier or an argument is not finite JSON; or <paramref name="functionCallId"/> is empty.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/> is not positive or infinite.</exception>
@@ -147,6 +147,11 @@ public sealed class A2UIRendererFunctionCalls : IDisposable
             throw new ArgumentException("The function call id must not be empty.", nameof(functionCallId));
         }
 
+        if (surfaceId is { Length: 0 })
+        {
+            throw new ArgumentException("The surface id must not be empty; pass null to run the call against an empty data model.", nameof(surfaceId));
+        }
+
         if (string.IsNullOrEmpty(call.CatalogId))
         {
             throw new ArgumentException($"The call to '{call.Name}' needs a catalog id.", nameof(call));
@@ -175,7 +180,7 @@ public sealed class A2UIRendererFunctionCalls : IDisposable
         string id = functionCallId ?? "call-" + Guid.NewGuid().ToString("N");
         CheckTarget(call.CatalogId, call.Name, args, id);
         JsonObject body = new();
-        if (!string.IsNullOrEmpty(surfaceId))
+        if (surfaceId is not null)
         {
             body["surfaceId"] = surfaceId;
         }
@@ -374,15 +379,47 @@ public sealed class A2UIRendererFunctionCalls : IDisposable
             return;
         }
 
-        if (!_catalogs.TryGetValue(catalogId, out Catalog? catalog))
+        FunctionDefinition definition = FindCallable(catalogId, name, id, A2UIErrorCodes.UnknownFunction, out Catalog catalog);
+        CheckNestedCalls(args, catalog, id);
+        if (definition.ArgsSchema is { } schema && ArgsSchema.ValidateUnresolved(schema, args) is { } problem)
         {
-            throw new A2UIException(A2UIErrorCodes.UnknownFunction, $"The call to '{name}' names catalog '{catalogId}', which is not one of the agent's catalogs.") { FunctionCallId = id };
+            throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Invalid arguments for function '{name}': {problem}") { FunctionCallId = id };
         }
+    }
+
+    /// <summary>
+    /// Finds a renderer function the agent may call. Catalogs for another protocol version are skipped, as the
+    /// renderer skips them.
+    /// </summary>
+    /// <remarks>
+    /// The agent's copy of a catalog usually comes from the catalog document and has no implementations, so a function
+    /// counts as a renderer function when the catalog declares it and it is not one of
+    /// <see cref="A2UIRendererFunctionCallsOptions.AgentFunctions"/>.
+    /// </remarks>
+    /// <exception cref="A2UIException">
+    /// The catalog or function is unknown (<paramref name="unknownCode"/>), or the function is <c>rendererOnly</c> or
+    /// needs user activation (<see cref="A2UIErrorCodes.InvalidFunctionCall"/>).
+    /// </exception>
+    /// <returns>The function's declaration.</returns>
+    /// <param name="catalogId">The catalog id.</param>
+    /// <param name="name">The function name.</param>
+    /// <param name="id">The call's id, for the error.</param>
+    /// <param name="unknownCode">The code for an unknown catalog or function.</param>
+    /// <param name="catalog">Set to the catalog.</param>
+    private FunctionDefinition FindCallable(string catalogId, string name, string id, string unknownCode, out Catalog catalog)
+    {
+        // CheckTarget runs FindCallable only when catalogs were given.
+        if (!_catalogs!.TryGetValue(catalogId, out Catalog? found) || found.ProtocolVersion != A2UIProtocol.Version)
+        {
+            throw new A2UIException(unknownCode, $"The call to '{name}' names catalog '{catalogId}', which is not one of the agent's catalogs for A2UI {A2UIProtocol.Version}.") { FunctionCallId = id };
+        }
+
+        catalog = found;
 
         // An agent function runs on the agent, so the renderer cannot run it.
         if (!catalog.Functions.TryGetValue(name, out FunctionDefinition? definition) || _options.AgentFunctions?.Contains(catalogId, name) == true)
         {
-            throw new A2UIException(A2UIErrorCodes.UnknownFunction, $"Catalog '{catalogId}' has no renderer function '{name}'.") { FunctionCallId = id };
+            throw new A2UIException(unknownCode, $"Catalog '{catalogId}' has no renderer function '{name}'.") { FunctionCallId = id };
         }
 
         if (definition.AllowedCallers == AllowedCallers.RendererOnly)
@@ -395,9 +432,48 @@ public sealed class A2UIRendererFunctionCalls : IDisposable
             throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Function '{name}' requires user activation, and a call from the agent has no user gesture.") { FunctionCallId = id };
         }
 
-        if (definition.ArgsSchema is { } schema && ArgsSchema.ValidateUnresolved(schema, args) is { } problem)
+        return definition;
+    }
+
+    /// <summary>
+    /// Checks the calls nested in a call's arguments the way the renderer does before anything runs: each must be a
+    /// renderer function the agent may call, and no system function (such as <c>@index</c>) can run outside a list
+    /// template. The arguments' depth was bounded before this runs.
+    /// </summary>
+    /// <exception cref="A2UIException">A nested call would be refused (<see cref="A2UIErrorCodes.InvalidFunctionCall"/>).</exception>
+    /// <param name="node">The argument value to check.</param>
+    /// <param name="catalog">The catalog that nested calls without a catalog id resolve to.</param>
+    /// <param name="id">The call's id, for the error.</param>
+    private void CheckNestedCalls(JsonNode? node, Catalog catalog, string id)
+    {
+        switch (node)
         {
-            throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Invalid arguments for function '{name}': {problem}") { FunctionCallId = id };
+            case JsonObject obj:
+                Catalog scope = catalog;
+                if (A2UIValues.AsString(obj["@call"]) is { } nested)
+                {
+                    if (nested.StartsWith('@'))
+                    {
+                        throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"The system function '{nested}' cannot run in a call from the agent, which is outside any list template.") { FunctionCallId = id };
+                    }
+
+                    string nestedCatalogId = A2UIValues.AsString(obj["catalogId"]) ?? catalog.CatalogId;
+                    FindCallable(nestedCatalogId, nested, id, A2UIErrorCodes.InvalidFunctionCall, out scope);
+                }
+
+                foreach ((string _, JsonNode? child) in obj)
+                {
+                    CheckNestedCalls(child, scope, id);
+                }
+
+                break;
+            case JsonArray array:
+                foreach (JsonNode? item in array)
+                {
+                    CheckNestedCalls(item, catalog, id);
+                }
+
+                break;
         }
     }
 

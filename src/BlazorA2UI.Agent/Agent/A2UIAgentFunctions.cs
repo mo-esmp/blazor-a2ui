@@ -76,7 +76,8 @@ public sealed class A2UIAgentFunctions
 
     /// <summary>
     /// Raised when a handler throws an exception other than <see cref="A2UIException"/>. The renderer gets only a
-    /// generic message, so log the exception here.
+    /// generic message, so log the exception here. An exception a subscriber throws is ignored, so the call is still
+    /// answered.
     /// </summary>
     public event Action<A2UIAgentFunctionCall, Exception>? FunctionFailed;
 
@@ -368,7 +369,15 @@ public sealed class A2UIAgentFunctions
         }
         catch (Exception ex)
         {
-            FunctionFailed?.Invoke(call, ex);
+            try
+            {
+                FunctionFailed?.Invoke(call, ex);
+            }
+            catch (Exception)
+            {
+                // A failing log subscriber must not cost the renderer its answer.
+            }
+
             return Failure(call.FunctionCallId, A2UIErrorCodes.ExecutionError, $"Function '{call.Name}' failed.");
         }
 
