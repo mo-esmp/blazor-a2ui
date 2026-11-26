@@ -1,5 +1,7 @@
 # blazor-a2ui
 
+[![CI](https://github.com/mo-esmp/blazor-a2ui/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mo-esmp/blazor-a2ui/actions/workflows/ci.yml)
+
 A Blazor renderer for [A2UI](https://a2ui.org) **v1.0**, the Agent-to-UI protocol: an agent
 streams JSON messages that describe a UI, and the renderer draws it with native components,
 keeps a data model, and sends the user's actions back.
@@ -36,6 +38,8 @@ A model writes the UI, so everything in a message is treated as untrusted input:
 
 The core enforces the parts that are protocol-level (URL schemes, user activation, regex safety,
 limits); the component library enforces the rendering rules.
+
+To report a vulnerability, or for the full security model, see [SECURITY.md](SECURITY.md).
 
 ## Hosting models
 

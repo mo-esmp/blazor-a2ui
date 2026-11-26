@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a new feature or an improvement.
+labels: ["enhancement"]
+body:
+    - type: textarea
+      id: problem
+      attributes:
+          label: What problem does this solve?
+          description: The use case, and what you can't do today.
+      validations:
+          required: true
+    - type: textarea
+      id: solution
+      attributes:
+          label: Proposed solution
+          description: How you'd like it to work. A code sample of the API you have in mind helps.
+      validations:
+          required: true
+    - type: textarea
+      id: alternatives
+      attributes:
+          label: Alternatives considered
+          description: Other approaches you've thought about, including workarounds.
+    - type: checkboxes
+      id: safety
+      attributes:
+          label: Safety rules
+          description: A model writes the UI, so every value in a message is untrusted. See the safety rules in the [README](https://github.com/mo-esmp/blazor-a2ui#safety-rules).
+          options:
+              - label: This feature doesn't need a model value to reach an inline style, raw HTML, JavaScript or a URL the browser fetches on its own.
+                required: true
+    - type: textarea
+      id: context
+      attributes:
+          label: Additional context
+          description: Mockups, links or anything else that helps.

@@ -1,0 +1,60 @@
+name: Spec compliance
+description: Report a place where BlazorA2UI differs from the A2UI v1.0 specification.
+labels: ["spec-compliance"]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              The A2UI v1.0 specification is the authority, at the commit pinned in [THIRD-PARTY-NOTICES.md](https://github.com/mo-esmp/blazor-a2ui/blob/main/THIRD-PARTY-NOTICES.md), together with its conformance suites.
+    - type: input
+      id: reference
+      attributes:
+          label: Spec reference
+          description: A link to the section of the specification, the basic catalog or the conformance suite case.
+          placeholder: https://github.com/a2ui-project/a2ui/blob/<commit>/specification/v1_0/...
+      validations:
+          required: true
+    - type: textarea
+      id: current
+      attributes:
+          label: Current behavior
+          description: What BlazorA2UI does today (or doesn't do). Include the messages that show it if you can.
+      validations:
+          required: true
+    - type: textarea
+      id: required
+      attributes:
+          label: Required behavior
+          description: What the specification requires, quoted where possible.
+      validations:
+          required: true
+    - type: dropdown
+      id: area
+      attributes:
+          label: Area
+          multiple: true
+          options:
+              - Messages and the message processor
+              - Data model, JSON Pointers and binding
+              - Expressions and functions
+              - Catalogs and validation
+              - Renderer and agent function calls
+              - Basic catalog components
+              - Agent side (builders and validator)
+      validations:
+          required: true
+    - type: textarea
+      id: files
+      attributes:
+          label: Affected files
+          description: Key files that need to change, if you know them.
+    - type: checkboxes
+      id: criteria
+      attributes:
+          label: Acceptance criteria
+          description: For the pull request that closes this issue.
+          options:
+              - label: The implementation matches the specification at the pinned commit.
+              - label: A conformance suite case covers it, or a unit test where the suites don't.
+              - label: If the spec moved, the vendored suites and the pinned commit in THIRD-PARTY-NOTICES.md are updated in the same pull request.
+              - label: Any remaining divergence is explained in a code comment and in README.md.
