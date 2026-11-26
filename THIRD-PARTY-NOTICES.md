@@ -18,6 +18,8 @@ Used here:
 | --- | --- | --- |
 | Basic catalog v1 (`catalogs/basic/v1/catalog.json`) | `src/BlazorA2UI.Core/Catalogs/Basic/catalog.json` | None (embedded resource) |
 | v1.0 common types schema (`specification/v1_0/json/common_types.json`) | `src/BlazorA2UI.Core/Schemas/common_types.json` | None (embedded resource) |
+| v1.0 agent-to-renderer schema (`specification/v1_0/json/agent_to_renderer.json`) | `src/BlazorA2UI.Agent/Schemas/agent_to_renderer.json` | None (embedded resource) |
+| Prompt format and response parsing of the Python agent SDK (`python/a2ui_agent/src/a2ui/inference_formats/direct_json/`) | `src/BlazorA2UI.Agent/Agent/A2UIPromptBuilder.cs`, `A2UIResponseStream.cs` | Same block format and workflow rules; parser written anew |
 | Expression template parser (`typescript/core/web_core/src/expressions/expression_parser.ts`) | `src/BlazorA2UI.Core/Expressions/ExpressionParser.cs` | Ported to C# |
 | A2UI regex dialect and safety checks (`typescript/core/web_core/src/common/regex_subset.ts`) | `src/BlazorA2UI.Core/Expressions/A2UIRegex.cs` | Ported to C#; emits .NET regular expressions |
 | Conformance suites (`conformance/core/*.yaml`, `conformance/test_data/catalogs/*.json`) | `tests/BlazorA2UI.Core.Tests/Conformance/data/` | None (test data) |
