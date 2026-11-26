@@ -5,7 +5,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json.Nodes;
-using BlazorA2UI.Text;
+using BlazorA2UI.Unicode;
 
 namespace BlazorA2UI.Expressions;
 

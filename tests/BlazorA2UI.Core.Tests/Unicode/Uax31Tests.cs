@@ -1,9 +1,9 @@
 ﻿using System.Text;
-using BlazorA2UI.Text;
+using BlazorA2UI.Unicode;
 using Shouldly;
 using Xunit;
 
-namespace BlazorA2UI.Tests.Text;
+namespace BlazorA2UI.Tests.Unicode;
 
 /// <summary>
 /// Tests for <see cref="Uax31"/> identifier checks.

@@ -1,6 +1,6 @@
 ﻿using System.Text;
 
-namespace BlazorA2UI.Text;
+namespace BlazorA2UI.Unicode;
 
 /// <summary>
 /// Unicode Standard Annex #31 identifier checks (<c>^[\p{XID_Start}_][\p{XID_Continue}]*$</c>),

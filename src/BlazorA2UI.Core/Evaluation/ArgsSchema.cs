@@ -89,6 +89,45 @@ internal static class ArgsSchema
     }
 
     /// <summary>
+    /// Checks the arguments of a call whose arguments are not all resolved yet, as far as the unresolved ones allow:
+    /// every required argument must be present or have a default, a closed schema allows no other argument, and each
+    /// argument that is a plain literal must match its schema. Arguments that hold a binding or call are checked only
+    /// once they resolve.
+    /// </summary>
+    /// <param name="schema">The function's argument schema.</param>
+    /// <param name="args">The unresolved arguments, with keys unescaped.</param>
+    /// <returns>A description of the first problem, or null when nothing is wrong yet.</returns>
+    public static string? ValidateUnresolved(JsonObject schema, JsonObject args)
+    {
+        JsonObject? props = schema["properties"] as JsonObject;
+        if (schema["required"] is JsonArray required)
+        {
+            foreach (JsonNode? r in required)
+            {
+                if (A2UIValues.AsString(r) is { } key && !args.ContainsKey(key) && (props?[key] as JsonObject)?["default"] is null)
+                {
+                    return $"missing required argument '{key}'";
+                }
+            }
+        }
+
+        bool closed = schema["additionalProperties"] is JsonValue ap && ap.GetValueKind() == JsonValueKind.False
+                     || schema["unevaluatedProperties"] is JsonValue up && up.GetValueKind() == JsonValueKind.False;
+        if (closed && props is not null)
+        {
+            foreach ((string key, JsonNode? _) in args)
+            {
+                if (!props.ContainsKey(key))
+                {
+                    return $"unexpected argument '{key}'";
+                }
+            }
+        }
+
+        return ValidateLiterals(schema, args) is { } literal ? literal.Problem : null;
+    }
+
+    /// <summary>
     /// Whether a literal argument contains a binding or call anywhere, so it can only be checked once it resolves.
     /// </summary>
     private static bool IsDynamic(JsonNode? node) => node switch

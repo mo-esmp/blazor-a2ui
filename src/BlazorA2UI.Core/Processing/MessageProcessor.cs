@@ -8,7 +8,7 @@ using BlazorA2UI.Data;
 using BlazorA2UI.Evaluation;
 using BlazorA2UI.Model;
 using BlazorA2UI.Rpc;
-using BlazorA2UI.Text;
+using BlazorA2UI.Unicode;
 
 namespace BlazorA2UI.Processing;
 
@@ -386,6 +386,12 @@ public sealed class MessageProcessor : IDisposable
     public bool IsDisposed => _disposed;
 
     /// <summary>
+    /// Gets or sets whether a <c>callRendererFunction</c> message runs its function. The agent-side validator mirrors a
+    /// renderer without acting as one, so it turns this off: the envelope is still checked, but nothing runs or is sent.
+    /// </summary>
+    internal bool RunsRendererFunctions { get; set; } = true;
+
+    /// <summary>
     /// Calls an agent function on behalf of the host (<c>callAgentFunction</c>) and waits for the agent's answer.
     /// </summary>
     /// <param name="surfaceId">The surface the call belongs to.</param>
@@ -605,7 +611,15 @@ public sealed class MessageProcessor : IDisposable
                 break;
             case "callRendererFunction":
                 ValidateCallRendererFunction(body);
-                Track(HandleCallRendererFunctionAsync(body, state.UserActivated));
+                if (RunsRendererFunctions)
+                {
+                    Track(HandleCallRendererFunctionAsync(body, state.UserActivated));
+                }
+                else
+                {
+                    CheckCallRendererFunction(body, state.UserActivated);
+                }
+
                 break;
             case "agentFunctionResponse":
                 HandleAgentFunctionResponse(body);
@@ -1233,6 +1247,42 @@ public sealed class MessageProcessor : IDisposable
         if (call.ContainsKey("args") && call["args"] is not JsonObject)
         {
             throw Invalid("callFunction 'args' must be an object.");
+        }
+    }
+
+    /// <summary>
+    /// Checks a <c>callRendererFunction</c> as far as running it would, without running it: the surface must exist and
+    /// the call must pass <see cref="A2UIEvaluator.CheckAgentCall"/>. Used when <see cref="RunsRendererFunctions"/> is
+    /// off. A renderer answers a call that fails these checks with an error response and goes on with the next message,
+    /// so a failure is reported against the call, with its id and the code the response would carry, and never thrown.
+    /// </summary>
+    /// <param name="body">The <c>callRendererFunction</c> body, already checked by <see cref="ValidateCallRendererFunction"/>.</param>
+    /// <param name="userActivated">Whether the message was processed inside a user gesture.</param>
+    private void CheckCallRendererFunction(JsonObject body, bool userActivated)
+    {
+        string? functionCallId = A2UIValues.AsString(body["functionCallId"]);
+        try
+        {
+            EvaluationContext context = EvaluationContext.Detached();
+            if (body.ContainsKey("surfaceId"))
+            {
+                string? surfaceId = A2UIValues.AsString(body["surfaceId"]);
+                if (surfaceId is null || !_surfaces.TryGetValue(surfaceId, out Surface? surface))
+                {
+                    throw new A2UIException(A2UIErrorCodes.InvalidFunctionCall, $"Surface '{surfaceId}' does not exist.");
+                }
+
+                context = surface.RootContext;
+            }
+
+            // ValidateCallRendererFunction already required callFunction to be an object.
+            Evaluator.CheckAgentCall((JsonObject)body["callFunction"]!, context, new EvaluationScope(EvaluationMode.AgentCall) { UserActivationOverride = userActivated });
+        }
+        catch (A2UIException ex)
+        {
+            // The same mapping as the error response of HandleCallRendererFunctionAsync.
+            string code = ex.Code == A2UIErrorCodes.InvalidFunctionCall ? A2UIErrorCodes.InvalidFunctionCall : A2UIErrorCodes.ExecutionError;
+            ReportError(new A2UIException(code, ex.Message) { FunctionCallId = functionCallId, Path = ex.Path }, null);
         }
     }
 
