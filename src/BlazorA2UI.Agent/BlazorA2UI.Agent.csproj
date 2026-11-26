@@ -2,13 +2,17 @@
 
   <PropertyGroup>
     <PackageId>BlazorA2UI.Agent</PackageId>
-    <Description>Agent-side helpers for A2UI v1.0: typed component builders for the basic catalog, message builders, a JSONL writer, a validator that checks messages the way a renderer would, handling of the messages a renderer sends back, and renderer function calls.</Description>
+    <Description>Agent-side helpers for A2UI v1.0: typed component builders for the basic catalog, message builders, a JSONL writer, a validator that checks messages the way a renderer would, handling of the messages a renderer sends back, renderer function calls, and LLM prompt generation and response parsing.</Description>
     <RootNamespace>BlazorA2UI</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="BlazorA2UI.Agent.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Schemas/agent_to_renderer.json" LogicalName="BlazorA2UI.Agent.Schemas.agent_to_renderer.json" />
   </ItemGroup>
 
   <ItemGroup>

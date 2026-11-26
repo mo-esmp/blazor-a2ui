@@ -8,8 +8,8 @@ keeps a data model, and sends the user's actions back.
 
 > **Status: preview.** The protocol core (`BlazorA2UI.Core`) passes Google's conformance
 > suites, and the Razor components (`BlazorA2UI`) render the whole basic catalog. The agent side
-> (`BlazorA2UI.Agent`) has its builders, validator and the messages that flow back from the
-> renderer; LLM prompts and the streaming endpoint are in progress. Names may
+> (`BlazorA2UI.Agent`) has its builders, validator, LLM prompts and response parsing, and the
+> messages that flow back from the renderer; the streaming endpoint is in progress. Names may
 > still change before the first release.
 >
 > | Part | Package | State |
@@ -18,7 +18,7 @@ keeps a data model, and sends the user's actions back.
 > | Blazor components: the basic catalog as Razor components, with the safety rules below | `BlazorA2UI` | Done |
 > | Agent side: component and message builders, a JSONL writer, a validator that mirrors the renderer | `BlazorA2UI.Agent` | Done |
 > | Agent side: messages from the renderer, agent functions, renderer function calls | `BlazorA2UI.Agent` | Done |
-> | Agent side: LLM prompts and response parsing | `BlazorA2UI.Agent` | Planned |
+> | Agent side: LLM prompts and response parsing | `BlazorA2UI.Agent` | Done |
 > | Streaming endpoint for ASP.NET Core, and sample apps | `BlazorA2UI.Agent.AspNetCore` | Planned |
 
 ## Safety rules
@@ -160,7 +160,7 @@ the agent endpoint must allow your app's origin (CORS).
 | `tests/BlazorA2UI.Core.Tests` | | Unit and conformance tests. |
 | `src/BlazorA2UI` | `BlazorA2UI` | Razor components, the media allowlist and `a2ui.css`. |
 | `tests/BlazorA2UI.Tests` | | bUnit tests for the components and the rendering safety rules. |
-| `src/BlazorA2UI.Agent` | `BlazorA2UI.Agent` | Agent-side builders, writer, validator, and handling of the renderer's messages. No dependency beyond the core. |
+| `src/BlazorA2UI.Agent` | `BlazorA2UI.Agent` | Agent-side builders, writer, validator, LLM prompts and response parsing, and handling of the renderer's messages. No dependency beyond the core. |
 | `tests/BlazorA2UI.Agent.Tests` | | Tests for the agent side, including a strict check of every basic component and round trips against the renderer core. |
 | `src/BlazorA2UI.Agent.AspNetCore` | `BlazorA2UI.Agent.AspNetCore` | Streaming endpoint for ASP.NET Core. Planned. |
 | `samples/` | | Blazor Server and WebAssembly sample apps and a sample agent. Planned. |
@@ -225,6 +225,59 @@ if (!result.IsValid)
 
 Custom components derive from `A2UIComponent` and write their properties through
 `A2UIComponentWriter`.
+
+## Asking a model for UI
+
+`A2UIPromptBuilder` writes the part of the system prompt that teaches a model to answer with
+A2UI: the rules for A2UI JSON blocks, the v1.0 schemas cut down to what the model may use, each
+catalog's instructions and optional examples. `A2UIResponseParser` and `A2UIResponseStream`
+read the answer back into text and messages. The format matches Google's Python agent SDK.
+
+```csharp
+A2UIPromptBuilder prompt = new([BasicCatalog.Create()]);
+prompt.Examples.Add([A2UIMessages.CreateSurface("main", new Text { Content = "Hello" })]);
+string systemPrompt = "You are a booking assistant.\n\n" + prompt.Build();
+
+// A complete answer:
+foreach (A2UIResponsePart part in A2UIResponseParser.Parse(answer))
+{
+    switch (part)
+    {
+        case A2UITextPart text: ShowText(text.Text); break;
+        case A2UIMessagePart message: await SendToRendererAsync(message.Message); break;
+        case A2UIErrorPart error: Log(error.Error); break; // or hand it back to the model to retry
+    }
+}
+
+// An answer that streams: each message is returned as soon as its JSON object closes,
+// so the renderer can draw while the model is still writing.
+A2UIResponseStream stream = new();
+await foreach (string chunk in model.StreamAsync(systemPrompt, question))
+{
+    Handle(stream.Append(chunk));
+}
+
+Handle(stream.Complete());
+```
+
+- **Only UI messages by default.** The prompt and the parsers allow `createSurface`,
+  `updateComponents`, `updateDataModel` and `deleteSurface`. Set `AllowedMessages` on the builder
+  and on `A2UIResponseParserOptions` to allow more, such as `callRendererFunction`.
+- **Forgiving, never throwing.** The parsers accept what models commonly get wrong: tags in
+  another case, Markdown fences, a single message instead of an array, trailing commas, comments,
+  raw line breaks in strings, curly quotes and a missing `version`. A close tag inside a JSON string
+  does not end a block. A block they cannot read becomes an `A2UIErrorPart`, written so it can be
+  passed back to the model.
+- **Bounded.** A block may hold at most `MaxBlockLength` characters (1,000,000 by default) and an
+  answer at most `MaxMessages` messages (1,000), and JSON may nest no deeper than the renderer
+  accepts.
+- **Still validate.** The parsers check each message's envelope, not its content. Pass each
+  message through `A2UIMessageValidator` before sending it if you want to catch the model's
+  mistakes on the agent side; the renderer checks everything again either way.
+- **Tool calls.** For a model that returns UI as a tool call's JSON arguments, use
+  `A2UIResponseParser.ParseJson`.
+- **Agent-only functions** are left out of the prompt's catalogs, since UI the model writes may never
+  call them.
 
 ## Handling messages from the renderer
 
