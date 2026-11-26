@@ -187,6 +187,32 @@ public sealed partial class A2UIPromptBuilderTests
     }
 
     /// <summary>
+    /// Proves that a function the document marks <c>agentOnly</c> is left out even when the catalog has no definition
+    /// for it.
+    /// </summary>
+    [Fact]
+    public void Build_AgentOnlyFunctionOnlyInDocument_IsLeftOut()
+    {
+        // Arrange
+        JsonObject document = new()
+        {
+            ["functions"] = new JsonObject
+            {
+                ["notify"] = new JsonObject { ["type"] = "object", ["allowedCallers"] = "agentOnly" },
+                ["lookup"] = new JsonObject { ["type"] = "object", ["allowedCallers"] = "rendererOrAgent" },
+            },
+        };
+        Catalog catalog = new("urn:tools", [], [], document: document);
+        A2UIPromptBuilder builder = new([catalog]);
+
+        // Act
+        JsonObject schema = Section(builder.Build(), "Catalog Schema").ShouldNotBeNull();
+
+        // Assert
+        schema["functions"]!.AsObject().Select(p => p.Key).ShouldBe(["lookup"]);
+    }
+
+    /// <summary>
     /// Proves that a component the catalog's document does not describe is refused, since the model could not learn it.
     /// </summary>
     [Fact]

@@ -206,6 +206,57 @@ public sealed class A2UIResponseParserTests
     }
 
     /// <summary>
+    /// Proves that a close tag inside a block comment is comment text, while a line comment ends at a close tag.
+    /// </summary>
+    [Fact]
+    public void Parse_CloseTagInComments_BlockCommentKeepsBlockOpen()
+    {
+        // Arrange
+        string answer = $"<a2ui-json>[/* not </a2ui-json> yet */{Create}] // done</a2ui-json>after";
+
+        // Act
+        IReadOnlyList<A2UIResponsePart> parts = A2UIResponseParser.Parse(answer);
+
+        // Assert
+        Describe(parts).ShouldBe([$"M:{Create}", "T:after"]);
+    }
+
+    /// <summary>
+    /// Proves that text after a block, arriving in the same large chunk, does not count toward the block's limit.
+    /// </summary>
+    [Fact]
+    public void Append_LargeTextAfterBlockInOneChunk_IsNotCountedInBlock()
+    {
+        // Arrange
+        A2UIResponseStream stream = new(new A2UIResponseParserOptions { MaxBlockLength = Create.Length + 14 });
+        string after = new('x', 50_000);
+
+        // Act
+        List<A2UIResponsePart> parts = [.. stream.Append($"<a2ui-json>[{Create}]</a2ui-json>{after}"), .. stream.Complete()];
+
+        // Assert
+        Describe(parts).ShouldBe([$"M:{Create}", "T:" + after]);
+    }
+
+    /// <summary>
+    /// Proves that a block longer than the limit, arriving in one chunk, is refused and the text after it is kept.
+    /// </summary>
+    [Fact]
+    public void Append_OversizedBlockInOneChunk_IsRefusedAndTextKept()
+    {
+        // Arrange
+        A2UIResponseStream stream = new(new A2UIResponseParserOptions { MaxBlockLength = 1_000 });
+        string value = new('x', 100_000);
+        string answer = $$$"""<a2ui-json>[{"updateDataModel":{"surfaceId":"m","value":"{{{value}}}"}}]</a2ui-json>after""";
+
+        // Act
+        List<A2UIResponsePart> parts = [.. stream.Append(answer), .. stream.Complete()];
+
+        // Assert
+        Describe(parts).ShouldBe(["E:The A2UI JSON block is longer than 1000 characters.", "T:after"]);
+    }
+
+    /// <summary>
     /// Proves that raw line breaks and tabs inside strings are read as escaped.
     /// </summary>
     [Fact]
@@ -311,6 +362,8 @@ public sealed class A2UIResponseParserTests
     [InlineData("""["deleteSurface"]""", "Each item of an A2UI JSON block must be a message object.")]
     [InlineData("""[[{"deleteSurface":{"surfaceId":"m"}}]]""", "Each item of an A2UI JSON block must be a message object.")]
     [InlineData("""[{"deleteSurface":{"surfaceId":m}}]""", "A2UI message 1 is not valid JSON:")]
+    [InlineData("[}", "The JSON in the A2UI JSON block has a '}' that does not match the bracket it closes.")]
+    [InlineData("""[{"deleteSurface":{"surfaceId":"m"]]""", "The JSON in the A2UI JSON block has a ']' that does not match the bracket it closes.")]
     public void Parse_BrokenBlock_ReportsErrorAndKeepsText(string block, string error)
     {
         // Arrange

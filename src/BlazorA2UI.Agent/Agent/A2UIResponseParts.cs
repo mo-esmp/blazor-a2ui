@@ -36,7 +36,8 @@ public sealed class A2UIResponseParserOptions
     public A2UIAgentMessages AllowedMessages { get; init; } = A2UIAgentMessages.Ui;
 
     /// <summary>
-    /// Gets the longest block accepted, in characters. The default is one million.
+    /// Gets the longest block accepted, in characters from the end of its open tag to the end of its close tag. The
+    /// stream never holds more than this of one block. The default is one million.
     /// </summary>
     public int MaxBlockLength { get; init; } = 1_000_000;
 

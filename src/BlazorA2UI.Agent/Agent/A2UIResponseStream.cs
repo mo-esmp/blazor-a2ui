@@ -36,6 +36,11 @@ public sealed class A2UIResponseStream
     private const int MaxOpenTagLength = 256;
 
     /// <summary>
+    /// The most characters of a chunk added to the open block before it is scanned.
+    /// </summary>
+    private const int SliceLength = 4096;
+
+    /// <summary>
     /// The options.
     /// </summary>
     private readonly A2UIResponseParserOptions _options;
@@ -84,6 +89,11 @@ public sealed class A2UIResponseStream
     /// How deeply the scan is nested in the block's JSON.
     /// </summary>
     private int _depth;
+
+    /// <summary>
+    /// The bracket that opened each level of the block's JSON, from the outermost.
+    /// </summary>
+    private readonly char[] _openers = new char[JsonChecks.MaxDepth + 2];
 
     /// <summary>
     /// Whether the scan is inside a JSON string.
@@ -247,26 +257,38 @@ public sealed class A2UIResponseStream
         }
 
         List<A2UIResponsePart> parts = [];
-        string pending = chunk;
+        ReadOnlyMemory<char> pending = chunk.AsMemory();
         while (pending.Length > 0)
         {
             if (_inBlock)
             {
-                AppendToBlock(pending, parts);
-                pending = string.Empty;
+                // Feed the block a slice at a time, never past its limit, so a large chunk cannot grow the buffer past
+                // the limit and text after the close tag is not counted as part of the block.
+                int allowance = _rejected ? SliceLength : _options.MaxBlockLength - _blockLength;
+                if (allowance <= 0)
+                {
+                    Reject(parts, $"The A2UI JSON block is longer than {_options.MaxBlockLength} characters.");
+                    continue;
+                }
+
+                int take = Math.Min(pending.Length, Math.Min(SliceLength, allowance));
+                AppendToBlock(pending.Span[..take]);
+                ReadOnlyMemory<char> rest = pending[take..];
+                pending = ReadOnlyMemory<char>.Empty;
                 int end = ScanBlock(parts);
                 if (end < 0)
                 {
-                    break;
+                    pending = rest;
+                    continue;
                 }
 
-                pending = new string(_buffer, end, _length - end);
+                pending = string.Concat(_buffer.AsSpan(end, _length - end), rest.Span).AsMemory();
                 EndBlock();
                 continue;
             }
 
-            _text.Append(pending);
-            pending = string.Empty;
+            _text.Append(pending.Span);
+            pending = ReadOnlyMemory<char>.Empty;
             string text = _text.ToString();
             int open = text.IndexOf(OpenTagStart, StringComparison.OrdinalIgnoreCase);
             while (open >= 0)
@@ -284,7 +306,7 @@ public sealed class A2UIResponseStream
                     _text.Clear();
                     _inBlock = true;
                     _atSegmentStart = true;
-                    pending = text[close..];
+                    pending = text.AsMemory(close);
                     break;
                 }
 
@@ -468,11 +490,10 @@ public sealed class A2UIResponseStream
     }
 
     /// <summary>
-    /// Adds text to the open block, rejecting the block once it passes <see cref="A2UIResponseParserOptions.MaxBlockLength"/>.
+    /// Adds text to the open block.
     /// </summary>
     /// <param name="text">The text.</param>
-    /// <param name="parts">Receives an error part when the block becomes too long.</param>
-    private void AppendToBlock(string text, List<A2UIResponsePart> parts)
+    private void AppendToBlock(ReadOnlySpan<char> text)
     {
         _blockLength += text.Length;
         if (_length + text.Length > _buffer.Length)
@@ -480,12 +501,8 @@ public sealed class A2UIResponseStream
             Array.Resize(ref _buffer, Math.Max(_buffer.Length * 2, _length + text.Length));
         }
 
-        text.CopyTo(0, _buffer, _length, text.Length);
+        text.CopyTo(_buffer.AsSpan(_length));
         _length += text.Length;
-        if (!_rejected && _blockLength > _options.MaxBlockLength)
-        {
-            Reject(parts, $"The A2UI JSON block is longer than {_options.MaxBlockLength} characters.");
-        }
     }
 
     /// <summary>
@@ -516,7 +533,9 @@ public sealed class A2UIResponseStream
                 continue;
             }
 
-            if (c == '<' && _wrapped)
+            // A close tag ends the block outside strings and /* */ comments. A // comment ends at a close tag, since
+            // a model may put one on the same line as its last comment.
+            if (c == '<' && _wrapped && _comment != CommentKind.Block)
             {
                 TagMatch match = CloseTagAt(_position, out int end);
                 if (match == TagMatch.Partial)
@@ -655,6 +674,7 @@ public sealed class A2UIResponseStream
         if (c == '[')
         {
             _shape = BlockShape.Array;
+            _openers[0] = c;
             _depth = 1;
             _position++;
             return true;
@@ -664,6 +684,7 @@ public sealed class A2UIResponseStream
         {
             _shape = BlockShape.Object;
             _itemStart = _position;
+            _openers[0] = c;
             _depth = 1;
             _position++;
             return true;
@@ -711,8 +732,15 @@ public sealed class A2UIResponseStream
                     return;
                 }
 
+                _openers[_depth - 1] = c;
                 break;
             case '}' or ']':
+                if (c != (_openers[_depth - 1] == '[' ? ']' : '}'))
+                {
+                    Reject(parts, $"The JSON in the A2UI JSON block has a '{c}' that does not match the bracket it closes.");
+                    return;
+                }
+
                 _depth--;
                 if (_depth == 1 && _shape == BlockShape.Array && c == '}')
                 {

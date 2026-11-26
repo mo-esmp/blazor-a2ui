@@ -1,6 +1,7 @@
 ﻿using System.Text;
 using System.Text.Json;
 using BlazorA2UI.Catalogs;
+using BlazorA2UI.Evaluation;
 using BlazorA2UI.Processing;
 
 namespace BlazorA2UI.Agent;
@@ -192,6 +193,11 @@ public sealed class A2UIPromptBuilder
 
         document["components"] = components;
         JsonObject functions = document["functions"] as JsonObject ?? new JsonObject();
+        foreach (string name in functions.Where(p => p.Value?["allowedCallers"] is JsonValue callers && A2UIValues.AsString(callers) == "agentOnly").Select(p => p.Key).ToList())
+        {
+            functions.Remove(name);
+        }
+
         foreach (FunctionDefinition function in catalog.Functions.Values)
         {
             if (function.AllowedCallers == AllowedCallers.AgentOnly)
