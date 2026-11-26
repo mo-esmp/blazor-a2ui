@@ -81,6 +81,17 @@ public static class A2UIErrorCodes
     /// An agent call was made after the processor was disposed. Never sent to the agent.
     /// </summary>
     public const string Disposed = "DISPOSED";
+
+    /// <summary>
+    /// A call could not be sent because the most calls allowed are already waiting for an answer. Never sent to the
+    /// other side.
+    /// </summary>
+    public const string TooManyPending = "TOO_MANY_PENDING";
+
+    /// <summary>
+    /// A call failed for a reason no other code describes, such as a malformed answer.
+    /// </summary>
+    public const string UnknownError = "UNKNOWN_ERROR";
 }
 
 /// <summary>
