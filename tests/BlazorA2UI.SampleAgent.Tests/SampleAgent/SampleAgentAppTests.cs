@@ -179,6 +179,29 @@ public sealed class SampleAgentAppTests
     }
 
     /// <summary>
+    /// Proves that a long user message is shortened before it reaches the model and the history.
+    /// </summary>
+    [Fact]
+    public async Task Text_LongMessage_IsShortened()
+    {
+        // Arrange
+        RecordingChatClient chat = new("Sure.");
+        await using SampleAgentHost host = await SampleAgentHost.StartAsync(s_today, chat);
+        using MessageProcessor processor = Renderer(timeZone: null);
+        using HttpClient http = new();
+        await using A2UIAgentClient client = new(http, processor, new A2UIAgentClientOptions { Endpoint = host.Endpoint });
+
+        // Act
+        await client.SendTextAsync(new string('a', 100_000));
+        await client.SendTextAsync("Thanks");
+
+        // Assert
+        client.LastError.ShouldBeNull();
+        chat.Requests[0][^1].Text.Length.ShouldBe(BookingAgent.MaxUserTextLength + 1);
+        chat.Requests[1][1].Text.Length.ShouldBe(BookingAgent.MaxUserTextLength + 1);
+    }
+
+    /// <summary>
     /// Proves that a browser on the renderer's origin may call the agent and read the conversation header, and that
     /// another origin may not.
     /// </summary>
@@ -257,6 +280,7 @@ public sealed class SampleAgentAppTests
     [InlineData("https://localhost:7090/")]
     [InlineData("https://localhost:7090/app")]
     [InlineData("ftp://localhost")]
+    [InlineData("https://localhost:7090#app")]
     public void Validate_BadOrigin_Throws(string origin)
     {
         // Arrange

@@ -35,6 +35,7 @@ internal sealed class SampleAgentOptions
                 || uri.AbsolutePath != "/"
                 || origin.EndsWith('/')
                 || uri.Query.Length > 0
+                || uri.Fragment.Length > 0
                 || !string.IsNullOrEmpty(uri.UserInfo))
             {
                 throw new InvalidOperationException($"'{origin}' in {Section}:RendererOrigins is not an origin such as https://localhost:7090.");

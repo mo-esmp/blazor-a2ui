@@ -35,6 +35,12 @@ internal sealed class BookingAgent(IChatClient chat, ConversationHistory history
     private const int MaxRendererTextLength = 500;
 
     /// <summary>
+    /// The longest user message passed to the model and kept in the history, in characters. With the history's own
+    /// limits this bounds the memory a conversation holds.
+    /// </summary>
+    internal const int MaxUserTextLength = 4000;
+
+    /// <summary>
     /// How long to wait for the renderer's time zone.
     /// </summary>
     private static readonly TimeSpan s_timeZoneTimeout = TimeSpan.FromSeconds(10);
@@ -59,7 +65,7 @@ internal sealed class BookingAgent(IChatClient chat, ConversationHistory history
         List<string> notes = [];
         if (turn.Text is { Length: > 0 } text)
         {
-            notes.Add(text);
+            notes.Add(Shorten(text, MaxUserTextLength));
         }
 
         foreach (A2UIRendererAction action in turn.Actions)
@@ -86,7 +92,7 @@ internal sealed class BookingAgent(IChatClient chat, ConversationHistory history
 
         if (notes.Count > 0)
         {
-            await AnswerAsync(turn, string.Join('\n', notes), cancellationToken);
+            await AnswerAsync(turn, Shorten(string.Join('\n', notes), MaxUserTextLength), cancellationToken);
         }
     }
 
@@ -223,9 +229,10 @@ internal sealed class BookingAgent(IChatClient chat, ConversationHistory history
     /// <summary>
     /// Shortens text from the renderer before it goes to the model.
     /// </summary>
-    /// <returns>The text, at most <see cref="MaxRendererTextLength"/> characters.</returns>
+    /// <returns>The text, at most <paramref name="maxLength"/> characters and a mark that it was cut.</returns>
     /// <param name="text">The text.</param>
-    private static string Shorten(string text) => text.Length <= MaxRendererTextLength ? text : text[..MaxRendererTextLength] + "…";
+    /// <param name="maxLength">The most characters kept.</param>
+    private static string Shorten(string text, int maxLength = MaxRendererTextLength) => text.Length <= maxLength ? text : text[..maxLength] + "…";
 
     /// <summary>
     /// Builds the system prompt: the restaurant's rules and how to show the form, then the A2UI part with the booking
