@@ -35,6 +35,16 @@ internal sealed class BookingAgent(IChatClient chat, ConversationHistory history
     private const int MaxRendererTextLength = 500;
 
     /// <summary>
+    /// The longest message asking the model to fix its answer, in characters, instruction included.
+    /// </summary>
+    internal const int MaxRepairPromptLength = 4000;
+
+    /// <summary>
+    /// What the repair message asks the model to do, after the problems.
+    /// </summary>
+    private const string RepairInstruction = "\nSend corrected messages for what is missing. Do not repeat the messages that were sent.";
+
+    /// <summary>
     /// The longest user message passed to the model and kept in the history, in characters. With the history's own
     /// limits this bounds the memory a conversation holds.
     /// </summary>
@@ -122,17 +132,42 @@ internal sealed class BookingAgent(IChatClient chat, ConversationHistory history
                 break;
             }
 
-            StringBuilder repair = new(RepairPrompt);
-            foreach (A2UIErrorPart problem in problems)
-            {
-                repair.Append("\n- ").Append(problem.Error);
-            }
-
-            repair.Append("\nSend corrected messages for what is missing. Do not repeat the messages that were sent.");
-            messages.Add(new ChatMessage(ChatRole.User, repair.ToString()));
+            messages.Add(new ChatMessage(ChatRole.User, BuildRepairPrompt(problems)));
         }
 
         history.Add(turn.ConversationId, [.. messages[newMessages..]]);
+    }
+
+    /// <summary>
+    /// Builds the message that asks the model to fix its answer. It lists as many problems as fit in
+    /// <see cref="MaxRepairPromptLength"/>, says how many more there were, and always ends with the instruction.
+    /// </summary>
+    /// <returns>The message.</returns>
+    /// <param name="problems">The problems, in order.</param>
+    internal static string BuildRepairPrompt(IReadOnlyList<A2UIErrorPart> problems)
+    {
+        // Room for the instruction and for the line that counts the problems left out.
+        int budget = MaxRepairPromptLength - RepairInstruction.Length - 40;
+        StringBuilder repair = new(RepairPrompt);
+        int listed = 0;
+        foreach (A2UIErrorPart problem in problems)
+        {
+            string line = "\n- " + Shorten(problem.Error);
+            if (repair.Length + line.Length > budget)
+            {
+                break;
+            }
+
+            repair.Append(line);
+            listed++;
+        }
+
+        if (listed < problems.Count)
+        {
+            repair.Append("\n- and ").Append(problems.Count - listed).Append(" more problems.");
+        }
+
+        return repair.Append(RepairInstruction).ToString();
     }
 
     /// <summary>

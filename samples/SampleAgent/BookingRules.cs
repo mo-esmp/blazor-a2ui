@@ -82,7 +82,13 @@ internal static class BookingRules
     }
 
     /// <summary>
-    /// Reads a date. A date input may also send a time, which is ignored.
+    /// The shapes a date input sends: a date, or a date and a time, as the browser's <c>date</c> and
+    /// <c>datetime-local</c> inputs write them.
+    /// </summary>
+    private static readonly string[] s_dateFormats = ["yyyy-MM-dd", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd'T'HH:mm:ss"];
+
+    /// <summary>
+    /// Reads a date. The whole value must be a valid date or date and time; the time, if any, is ignored.
     /// </summary>
     /// <returns>Whether the value is a date.</returns>
     /// <param name="node">The value.</param>
@@ -90,12 +96,14 @@ internal static class BookingRules
     private static bool TryReadDate(JsonNode? node, out DateOnly date)
     {
         date = default;
-        if (A2UIValues.AsString(node) is not { Length: >= 10 } text)
+        if (A2UIValues.AsString(node) is not { } text
+            || !DateTime.TryParseExact(text, s_dateFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime parsed))
         {
             return false;
         }
 
-        return DateOnly.TryParseExact(text.AsSpan(0, 10), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+        date = DateOnly.FromDateTime(parsed);
+        return true;
     }
 
     /// <summary>
