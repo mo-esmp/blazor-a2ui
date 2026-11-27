@@ -25,7 +25,7 @@
     }
 </div>
 
-<form class="composer" @onsubmit="SendAsync">
+<form class="composer" @onsubmit="SendAsync" @onsubmit:preventDefault>
     <input @bind="_input" maxlength="@MaxInputLength" placeholder="Ask the agent" aria-label="Message" />
     <button type="submit" disabled="@IsBusy">Send</button>
     <button type="button" disabled="@(!IsBusy)" @onclick="Agent.CancelTurns">Stop</button>
