@@ -99,8 +99,8 @@ public sealed class A2UIAgentClient : IAsyncDisposable
     private readonly Func<A2UIOutboundMessage, ValueTask> _outbound;
 
     /// <summary>
-    /// Guards <see cref="_queue"/>, <see cref="_turns"/>, <see cref="_working"/>, <see cref="_worker"/>,
-    /// <see cref="_opening"/> and <see cref="_isDisposed"/>.
+    /// Guards <see cref="_queue"/>, <see cref="_sideRequests"/>, <see cref="_turns"/>, <see cref="_working"/>,
+    /// <see cref="_worker"/>, <see cref="_opening"/> and <see cref="_isDisposed"/>.
     /// </summary>
     private readonly Lock _gate = new();
 
@@ -108,6 +108,12 @@ public sealed class A2UIAgentClient : IAsyncDisposable
     /// The turns waiting to run, in order.
     /// </summary>
     private readonly List<PendingTurn> _queue = [];
+
+    /// <summary>
+    /// The agent function calls and renderer function responses being sent, which disposal waits for. Finished ones are
+    /// removed when the next one is added.
+    /// </summary>
+    private readonly List<Task> _sideRequests = [];
 
     /// <summary>
     /// Cancelled when the client is disposed. It is never disposed, because requests still starting may link to it.
@@ -221,7 +227,9 @@ public sealed class A2UIAgentClient : IAsyncDisposable
     /// how the turn ended.
     /// </returns>
     /// <param name="text">The user's text.</param>
-    /// <param name="cancellationToken">Cancels the turn, while it waits or while it runs.</param>
+    /// <param name="cancellationToken">
+    /// Cancels the turn, while it waits or while it runs. A waiting turn leaves the queue at once, freeing its place.
+    /// </param>
     public Task SendTextAsync(string text, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(text);
@@ -246,17 +254,19 @@ public sealed class A2UIAgentClient : IAsyncDisposable
         cancelled.Cancel();
         foreach (PendingTurn turn in dropped)
         {
-            turn.Done.TrySetResult();
+            turn.End();
         }
     }
 
     /// <summary>
-    /// Disconnects from the processor, cancels every request and drops the waiting turns.
+    /// Disconnects from the processor, cancels every request and drops the waiting turns. Agent function calls still
+    /// being sent fail with <see cref="A2UIErrorCodes.Cancelled"/> before it returns.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
         List<PendingTurn> dropped;
         Task worker;
+        Task[] sideRequests;
         lock (_gate)
         {
             if (_isDisposed)
@@ -268,6 +278,8 @@ public sealed class A2UIAgentClient : IAsyncDisposable
             dropped = [.. _queue];
             _queue.Clear();
             worker = _worker;
+            sideRequests = [.. _sideRequests];
+            _sideRequests.Clear();
         }
 
         if (_processor.Outbound == _outbound)
@@ -278,11 +290,22 @@ public sealed class A2UIAgentClient : IAsyncDisposable
         _disposed.Cancel();
         foreach (PendingTurn turn in dropped)
         {
-            turn.Done.TrySetResult();
+            turn.End();
         }
 
         // The worker ends every turn itself and never fails.
         await worker;
+        foreach (Task sideRequest in sideRequests)
+        {
+            try
+            {
+                await sideRequest;
+            }
+            catch (Exception)
+            {
+                // A renderer function response that could not be sent; the processor already reported it.
+            }
+        }
     }
 
     /// <summary>
@@ -328,7 +351,22 @@ public sealed class A2UIAgentClient : IAsyncDisposable
             return ValueTask.CompletedTask;
         }
 
-        return new ValueTask(RunOnContextAsync(() => SendWithoutTurnAsync(outbound, kind)));
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_isDisposed, this);
+        }
+
+        Task send = RunOnContextAsync(() => SendWithoutTurnAsync(outbound, kind));
+        lock (_gate)
+        {
+            _sideRequests.RemoveAll(static task => task.IsCompleted);
+            if (!send.IsCompleted)
+            {
+                _sideRequests.Add(send);
+            }
+        }
+
+        return new ValueTask(send);
     }
 
     /// <summary>
@@ -375,8 +413,33 @@ public sealed class A2UIAgentClient : IAsyncDisposable
                 _worker = RunOnContextAsync(RunWorkerAsync, inline: false);
             }
 
+            if (cancellationToken.CanBeCanceled)
+            {
+                // A token that is already cancelled runs the callback here; the lock is reentrant, so it takes the turn
+                // straight back out of the queue.
+                turn.Registration = cancellationToken.Register(static state => ((Pending)state!).Client.Withdraw(((Pending)state!).Turn), new Pending(this, turn));
+            }
+
             return turn.Done.Task;
         }
+    }
+
+    /// <summary>
+    /// Takes a waiting turn out of the queue when its token is cancelled, and ends it. A turn that already started is
+    /// left to its run, which sees the same token.
+    /// </summary>
+    /// <param name="turn">The turn.</param>
+    private void Withdraw(PendingTurn turn)
+    {
+        lock (_gate)
+        {
+            if (!_queue.Remove(turn))
+            {
+                return;
+            }
+        }
+
+        turn.Done.TrySetResult();
     }
 
     /// <summary>
@@ -449,6 +512,8 @@ public sealed class A2UIAgentClient : IAsyncDisposable
                 turns = _turns.Token;
             }
 
+            // Outside the lock: disposing waits for a callback that is running, and the callback takes the lock.
+            turn.Registration.Dispose();
             try
             {
                 await RunTurnAsync(turn, turns);
@@ -497,8 +562,9 @@ public sealed class A2UIAgentClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// Sends an agent function call or a renderer function response, which the agent answers without a turn. A call
-    /// that cannot be sent fails at once instead of waiting for its timeout.
+    /// Sends an agent function call or a renderer function response, which the agent answers without a turn. The
+    /// agent answers a call in the same response, so a call that cannot be sent, or whose response ends without its
+    /// answer, fails at once instead of waiting for its timeout; one cut short by disposal fails as cancelled.
     /// </summary>
     /// <exception cref="Exception">A renderer function response could not be sent; the processor reports it.</exception>
     /// <param name="outbound">The message.</param>
@@ -506,22 +572,54 @@ public sealed class A2UIAgentClient : IAsyncDisposable
     private async Task SendWithoutTurnAsync(A2UIOutboundMessage outbound, string kind)
     {
         JsonObject message = outbound.Message;
+        string? callId = kind == "callAgentFunction" ? A2UIValues.AsString(message[kind]?["functionCallId"]) : null;
         try
         {
             await ExchangeAsync(null, [message], outbound.Metadata, isTurn: false, _disposed.Token);
         }
-        catch (Exception ex) when (kind == "callAgentFunction" && !_disposed.IsCancellationRequested && A2UIValues.AsString(message[kind]?["functionCallId"]) is { } id)
+        catch (Exception ex) when (callId is not null)
         {
-            _processor.Process(new JsonObject
+            if (_disposed.IsCancellationRequested)
             {
-                ["version"] = A2UIProtocol.Version,
-                ["agentFunctionResponse"] = new JsonObject
-                {
-                    ["functionCallId"] = id,
-                    ["error"] = new JsonObject { ["code"] = A2UIErrorCodes.ExecutionError, ["message"] = Describe(ex) },
-                },
-            });
+                FailCall(callId, A2UIErrorCodes.Cancelled, "The agent client was disposed.");
+            }
+            else
+            {
+                FailCall(callId, A2UIErrorCodes.ExecutionError, Describe(ex));
+            }
+
+            return;
         }
+
+        if (callId is not null)
+        {
+            FailCall(callId, A2UIErrorCodes.ExecutionError, "The agent's answer ended without a response to the call.");
+        }
+    }
+
+    /// <summary>
+    /// Fails an agent call that is still waiting, through the processor as if the agent had answered with the error. A
+    /// call that is no longer waiting is left alone, so no answer for an unknown call is reported.
+    /// </summary>
+    /// <param name="functionCallId">The call's id.</param>
+    /// <param name="code">The error's code.</param>
+    /// <param name="message">The error's message.</param>
+    private void FailCall(string functionCallId, string code, string message)
+    {
+        if (!_processor.IsAgentCallPending(functionCallId))
+        {
+            return;
+        }
+
+        _processor.Process(new JsonObject
+        {
+            ["version"] = A2UIProtocol.Version,
+            ["agentFunctionResponse"] = new JsonObject
+            {
+                ["functionCallId"] = functionCallId,
+                ["error"] = new JsonObject { ["code"] = code, ["message"] = message },
+            },
+        });
     }
 
     /// <summary>
@@ -549,7 +647,12 @@ public sealed class A2UIAgentClient : IAsyncDisposable
             sentId = _conversationId;
             using HttpRequestMessage request = BuildRequest(text, messages, metadata, sentId);
             response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            if (response.Headers.TryGetValues(ConversationHeader, out IEnumerable<string>? ids) && ids.FirstOrDefault() is { } id && IsAcceptableConversationId(id))
+
+            // Only an accepted request commits the id: an error response may carry one the agent will not honor.
+            if (response.IsSuccessStatusCode
+                && response.Headers.TryGetValues(ConversationHeader, out IEnumerable<string>? ids)
+                && ids.FirstOrDefault() is { } id
+                && IsAcceptableConversationId(id))
             {
                 _conversationId = id;
             }
@@ -571,10 +674,12 @@ public sealed class A2UIAgentClient : IAsyncDisposable
         using HttpResponseMessage answer = response;
         if (!response.IsSuccessStatusCode)
         {
-            if (response.StatusCode == HttpStatusCode.NotFound && sentId is not null)
+            if (response.StatusCode == HttpStatusCode.NotFound
+                && sentId is not null
+                && Interlocked.CompareExchange(ref _conversationId, null, sentId) == sentId)
             {
-                // The conversation expired; the next request starts a new one.
-                Interlocked.CompareExchange(ref _conversationId, null, sentId);
+                // The conversation expired, and the next request starts a new one, which knows nothing of this one.
+                ForgetConversation();
             }
 
             string? detail = await ReadDetailAsync(response, cancellationToken);
@@ -600,6 +705,34 @@ public sealed class A2UIAgentClient : IAsyncDisposable
         {
             _processor.ProcessLine(line);
         }
+    }
+
+    /// <summary>
+    /// Clears what belonged to an expired conversation: deletes every surface in the processor, which cancels their
+    /// agent calls and lets the new conversation reuse their ids, and drops the waiting actions and errors, which name
+    /// those surfaces. Waiting text turns stay; they open the new conversation.
+    /// </summary>
+    private void ForgetConversation()
+    {
+        List<PendingTurn> dropped = [];
+        lock (_gate)
+        {
+            for (int i = _queue.Count - 1; i >= 0; i--)
+            {
+                if (_queue[i].Text is null)
+                {
+                    dropped.Add(_queue[i]);
+                    _queue.RemoveAt(i);
+                }
+            }
+        }
+
+        foreach (PendingTurn turn in dropped)
+        {
+            turn.End();
+        }
+
+        _processor.DeleteAllSurfaces("The conversation with the agent expired.");
     }
 
     /// <summary>
@@ -913,5 +1046,26 @@ public sealed class A2UIAgentClient : IAsyncDisposable
         /// Gets the source completed when the turn ends.
         /// </summary>
         public TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>
+        /// Gets or sets the registration that takes the turn out of the queue when its token is cancelled.
+        /// </summary>
+        public CancellationTokenRegistration Registration { get; set; }
+
+        /// <summary>
+        /// Ends a turn that was dropped from the queue without running.
+        /// </summary>
+        public void End()
+        {
+            Registration.Dispose();
+            Done.TrySetResult();
+        }
     }
+
+    /// <summary>
+    /// The state of a turn's cancellation callback.
+    /// </summary>
+    /// <param name="Client">The client whose queue holds the turn.</param>
+    /// <param name="Turn">The turn.</param>
+    private sealed record Pending(A2UIAgentClient Client, PendingTurn Turn);
 }

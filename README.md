@@ -176,7 +176,9 @@ The client streams the agent's answer into the scoped `MessageProcessor` as it a
 `<A2UISurface>` re-renders as messages land. It sends the user's actions and the renderer's
 errors back as the next turn (one at a time; actions that wait together go in one request), and
 sends agent function calls and renderer function responses at once, even while a turn streams. It
-keeps the conversation's id between requests and forgets it when the agent says it expired.
+keeps the conversation's id between requests. When the agent says the conversation expired, the
+client forgets the id, deletes every surface (a new conversation knows none of them) and drops the
+waiting actions; the next turn opens a new conversation.
 
 - **Text.** Over server-sent events the agent's text arrives through `TextReceived`. It comes
   from the model, so show it as text, never as markup.
@@ -186,7 +188,9 @@ keeps the conversation's id between requests and forgets it when the agent says 
 - **Limits.** A line or event over `MaxLineLength` (1 MiB), a stream that ends in the middle of a
   message, a body that is not UTF-8, and a stream that sends nothing for `ReadTimeout` (2 minutes)
   all fail the turn with a clear error instead of hanging. At most `MaxQueuedTurns` (16) turns
-  wait.
+  wait; a waiting turn whose token is cancelled leaves the queue at once. An agent function call
+  fails at once when its response ends without the answer, or as cancelled when the client is
+  disposed.
 - **Threads.** The client works on the synchronization context it was created on, so inject it
   into a component and it processes messages on the renderer's thread.
 

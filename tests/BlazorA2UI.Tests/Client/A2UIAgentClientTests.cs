@@ -445,6 +445,158 @@ public sealed class A2UIAgentClientTests
     }
 
     /// <summary>
+    /// Proves that an agent call whose response ends without its answer fails at once instead of waiting forever.
+    /// </summary>
+    [Fact]
+    public async Task Outbound_AgentCallAnswerMissing_FailsTheCall()
+    {
+        // Arrange
+        FakeAgent agent = new((_, _) => Task.FromResult(FakeAgent.JsonLines(string.Empty)));
+        Catalog tools = new("urn:tools", [], [new FunctionDefinition("lookup") { AllowedCallers = AllowedCallers.RendererOrAgent }], A2UIProtocol.Version);
+        using MessageProcessor processor = new([BasicCatalog.Create(), tools]);
+        await using A2UIAgentClient client = Client(agent, processor);
+        processor.ProcessLine(CreateSurface);
+
+        // Act
+        A2UIException error = await Should.ThrowAsync<A2UIException>(
+            processor.CallAgentFunctionAsync("main", "urn:tools", "lookup", options: new BlazorA2UI.Rpc.A2UIAgentCallOptions { Timeout = Timeout.InfiniteTimeSpan })
+                .WaitAsync(TimeSpan.FromSeconds(5)));
+
+        // Assert
+        error.Code.ShouldBe(A2UIErrorCodes.ExecutionError);
+        error.Message.ShouldBe("The agent's answer ended without a response to the call.");
+    }
+
+    /// <summary>
+    /// Proves that disposing the client fails the agent calls it is still sending, as cancelled, before it returns.
+    /// </summary>
+    [Fact]
+    public async Task DisposeAsync_AgentCallInFlight_CancelsTheCall()
+    {
+        // Arrange
+        StreamingBody open = new();
+        FakeAgent agent = new((_, _) => Task.FromResult(FakeAgent.Streaming(open)));
+        Catalog tools = new("urn:tools", [], [new FunctionDefinition("lookup") { AllowedCallers = AllowedCallers.RendererOrAgent }], A2UIProtocol.Version);
+        using MessageProcessor processor = new([BasicCatalog.Create(), tools]);
+        A2UIAgentClient client = Client(agent, processor);
+        processor.ProcessLine(CreateSurface);
+        Task<JsonNode?> call = processor.CallAgentFunctionAsync("main", "urn:tools", "lookup", options: new BlazorA2UI.Rpc.A2UIAgentCallOptions { Timeout = Timeout.InfiniteTimeSpan });
+        await WaitForAsync(() => agent.Requests.Count == 1);
+
+        // Act
+        await client.DisposeAsync();
+
+        // Assert
+        A2UIException error = await Should.ThrowAsync<A2UIException>(call.WaitAsync(TimeSpan.FromSeconds(5)));
+        error.Code.ShouldBe(A2UIErrorCodes.Cancelled);
+    }
+
+    /// <summary>
+    /// Proves that a conversation that expired leaves nothing behind: the next conversation starts without the old
+    /// surfaces' data model, and the agent can create a surface with the same id again.
+    /// </summary>
+    [Fact]
+    public async Task SendTextAsync_ConversationExpired_StartsCleanConversation()
+    {
+        // Arrange
+        const string createWithData = """{"version":"1.0","createSurface":{"surfaceId":"main","catalogId":"https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json","sendDataModel":true,"dataModel":{"secret":"from the old conversation"},"components":[{"id":"root","component":"Text","text":"Hello"}]}}""";
+        int calls = 0;
+        FakeAgent agent = new((_, _) => Task.FromResult(++calls switch
+        {
+            1 => FakeAgent.JsonLines(createWithData + "\n"),
+            2 => FakeAgent.Problem(HttpStatusCode.NotFound, "The conversation is unknown or has expired."),
+            _ => FakeAgent.JsonLines(CreateSurface + "\n", "conv2"),
+        }));
+        using MessageProcessor processor = new([BasicCatalog.Create()]);
+        await using A2UIAgentClient client = Client(agent, processor);
+        List<A2UIErrorReport> errors = [];
+        processor.ErrorReported += errors.Add;
+        await client.SendTextAsync("one");
+        await client.SendTextAsync("two");
+
+        // Act
+        await client.SendTextAsync("three");
+
+        // Assert
+        JsonObject third = agent.Requests[2].Body;
+        third["metadata"]!.AsObject().ContainsKey("a2uiRendererDataModel").ShouldBeFalse();
+        agent.Requests[2].Request.Headers.Contains(A2UIAgentClient.ConversationHeader).ShouldBeFalse();
+        client.State.ShouldBe(A2UIConnectionState.Ended);
+        client.ConversationId.ShouldBe("conv2");
+        processor.Surfaces["main"].SendDataModel.ShouldBeFalse();
+        errors.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Proves that an error response never commits the conversation id it carries, so the next turn opens a fresh one.
+    /// </summary>
+    [Fact]
+    public async Task SendTextAsync_ErrorResponseCarriesId_IdIsNotKept()
+    {
+        // Arrange
+        int calls = 0;
+        FakeAgent agent = new((_, _) =>
+        {
+            if (++calls > 1)
+            {
+                return Task.FromResult(FakeAgent.JsonLines(string.Empty));
+            }
+
+            HttpResponseMessage refused = FakeAgent.Problem(HttpStatusCode.NotFound, "Unknown.");
+            refused.Headers.Add(A2UIAgentClient.ConversationHeader, "rejected");
+            return Task.FromResult(refused);
+        });
+        using MessageProcessor processor = new([BasicCatalog.Create()]);
+        await using A2UIAgentClient client = Client(agent, processor);
+        await client.SendTextAsync("one");
+
+        // Act
+        await client.SendTextAsync("two");
+
+        // Assert
+        agent.Requests[1].Request.Headers.Contains(A2UIAgentClient.ConversationHeader).ShouldBeFalse();
+        client.ConversationId.ShouldBe("conv1");
+    }
+
+    /// <summary>
+    /// Proves that cancelling a waiting turn takes it out of the queue at once, ending its task and freeing its place,
+    /// while the running turn goes on.
+    /// </summary>
+    [Fact]
+    public async Task SendTextAsync_WaitingTurnCancelled_FreesItsPlace()
+    {
+        // Arrange
+        StreamingBody first = new();
+        int calls = 0;
+        FakeAgent agent = new((_, _) => Task.FromResult(++calls == 1 ? FakeAgent.Streaming(first) : FakeAgent.JsonLines(string.Empty)));
+        using MessageProcessor processor = new([BasicCatalog.Create()]);
+        await using A2UIAgentClient client = Client(agent, processor, options => options.MaxQueuedTurns = 1);
+        TaskCompletionSource streaming = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.StateChanged += () =>
+        {
+            if (client.State == A2UIConnectionState.Streaming)
+            {
+                streaming.TrySetResult();
+            }
+        };
+        Task running = client.SendTextAsync("one");
+        await streaming.Task;
+        using CancellationTokenSource cancel = new();
+        Task waiting = client.SendTextAsync("two", cancel.Token);
+
+        // Act
+        await cancel.CancelAsync();
+        await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+        Task replacement = client.SendTextAsync("three");
+        first.End();
+        await Task.WhenAll(running, replacement);
+
+        // Assert
+        agent.Requests.Count.ShouldBe(2);
+        agent.Requests[1].Body["text"]!.GetValue<string>().ShouldBe("three");
+    }
+
+    /// <summary>
     /// Proves that disposing disconnects the client from the processor and refuses new turns.
     /// </summary>
     [Fact]
