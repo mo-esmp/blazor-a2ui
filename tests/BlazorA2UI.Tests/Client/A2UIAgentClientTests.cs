@@ -310,6 +310,109 @@ public sealed class A2UIAgentClientTests
     }
 
     /// <summary>
+    /// Proves that a request made while the first turn is still opening the conversation waits for its id, so both
+    /// join the same conversation.
+    /// </summary>
+    [Fact]
+    public async Task Outbound_WhileConversationOpens_WaitsForId()
+    {
+        // Arrange
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource firstArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        FakeAgent agent = new(async (_, body) =>
+        {
+            if (body.ContainsKey("text"))
+            {
+                firstArrived.TrySetResult();
+                await release.Task;
+            }
+
+            return FakeAgent.JsonLines(string.Empty, body.ContainsKey("text") ? "conv1" : "other");
+        });
+        using MessageProcessor processor = new([BasicCatalog.Create()]);
+        await using A2UIAgentClient client = Client(agent, processor);
+        Task turn = client.SendTextAsync("Hi");
+        await firstArrived.Task;
+        JsonObject response = JsonNode.Parse("""{"version":"1.0","rendererFunctionResponse":{"functionCallId":"c1","value":1}}""")!.AsObject();
+
+        // Act
+        // The client sets the processor's outbound.
+        Task side = processor.Outbound!(new A2UIOutboundMessage(response, null)).AsTask();
+        await Task.Delay(50);
+        int requestsWhileOpening = agent.Requests.Count;
+        release.SetResult();
+        await Task.WhenAll(turn, side);
+
+        // Assert
+        requestsWhileOpening.ShouldBe(1);
+        agent.Requests[1].Request.Headers.GetValues(A2UIAgentClient.ConversationHeader).ShouldBe(["conv1"]);
+    }
+
+    /// <summary>
+    /// Proves that an action carries the data model the processor captured when it was sent, and that a batch takes
+    /// the latest action's, rather than the data model as it is when the request leaves.
+    /// </summary>
+    [Fact]
+    public async Task Outbound_QueuedActions_KeepTheirDataModel()
+    {
+        // Arrange
+        StreamingBody first = new();
+        int calls = 0;
+        FakeAgent agent = new((_, _) => Task.FromResult(++calls == 1 ? FakeAgent.Streaming(first) : FakeAgent.JsonLines(string.Empty)));
+        using MessageProcessor processor = new([BasicCatalog.Create()]);
+        await using A2UIAgentClient client = Client(agent, processor);
+        TaskCompletionSource streaming = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.StateChanged += () =>
+        {
+            if (client.State == A2UIConnectionState.Streaming)
+            {
+                streaming.TrySetResult();
+            }
+        };
+        Task turn = client.SendTextAsync("Hi");
+        await streaming.Task;
+
+        // Act
+        // The client sets the processor's outbound.
+        await processor.Outbound!(new A2UIOutboundMessage(JsonNode.Parse(Action)!.AsObject(), Snapshot("old")));
+        await processor.Outbound!(new A2UIOutboundMessage(JsonNode.Parse(Action)!.AsObject(), Snapshot("at click")));
+        first.End();
+        await turn;
+        await WaitForAsync(() => agent.Requests.Count == 2 && client.State == A2UIConnectionState.Ended);
+
+        // Assert
+        // The second request is the batch of actions, and the processor has no surface that would add a data model.
+        agent.Requests[1].Body["metadata"]!["a2uiRendererDataModel"]!["surfaces"]!["main"]!["name"]!.GetValue<string>().ShouldBe("at click");
+    }
+
+    /// <summary>
+    /// Proves that the event limit counts UTF-8 bytes, so an event of multibyte characters cannot pass it.
+    /// </summary>
+    [Fact]
+    public async Task SendTextAsync_EventOverByteLimit_Fails()
+    {
+        // Arrange
+        string line = "data: " + new string('€', 15) + "\n";
+        StreamingBody stream = new();
+        stream.Send("event: a2ui\n" + line + line + line + "\n");
+        stream.End();
+        FakeAgent agent = new((_, _) => Task.FromResult(FakeAgent.Streaming(stream, "text/event-stream")));
+        using MessageProcessor processor = new([BasicCatalog.Create()]);
+        await using A2UIAgentClient client = Client(agent, processor, options =>
+        {
+            options.Format = A2UIAgentStreamFormat.EventStream;
+            options.MaxLineLength = 64;
+        });
+
+        // Act
+        await client.SendTextAsync("Hi");
+
+        // Assert
+        client.State.ShouldBe(A2UIConnectionState.Failed);
+        client.LastError.ShouldBe("The agent sent an event longer than 64 bytes.");
+    }
+
+    /// <summary>
     /// Proves that cancelling stops the running turn and drops the waiting ones.
     /// </summary>
     [Fact]
@@ -484,6 +587,20 @@ public sealed class A2UIAgentClientTests
         configure?.Invoke(options);
         return new A2UIAgentClient(new HttpClient(agent), processor, options);
     }
+
+    /// <summary>
+    /// Builds outbound metadata with a data model snapshot of one surface.
+    /// </summary>
+    /// <returns>The metadata.</returns>
+    /// <param name="name">The value of <c>/name</c> in the snapshot.</param>
+    private static JsonObject Snapshot(string name) => new()
+    {
+        ["a2uiRendererDataModel"] = new JsonObject
+        {
+            ["version"] = "1.0",
+            ["surfaces"] = new JsonObject { ["main"] = new JsonObject { ["name"] = name } },
+        },
+    };
 
     /// <summary>
     /// Waits until a condition holds, for at most five seconds.

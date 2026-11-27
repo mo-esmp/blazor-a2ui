@@ -99,8 +99,8 @@ public sealed class A2UIAgentClient : IAsyncDisposable
     private readonly Func<A2UIOutboundMessage, ValueTask> _outbound;
 
     /// <summary>
-    /// Guards <see cref="_queue"/>, <see cref="_turns"/>, <see cref="_working"/>, <see cref="_worker"/> and
-    /// <see cref="_isDisposed"/>.
+    /// Guards <see cref="_queue"/>, <see cref="_turns"/>, <see cref="_working"/>, <see cref="_worker"/>,
+    /// <see cref="_opening"/> and <see cref="_isDisposed"/>.
     /// </summary>
     private readonly Lock _gate = new();
 
@@ -124,6 +124,11 @@ public sealed class A2UIAgentClient : IAsyncDisposable
     /// The task that runs the queued turns.
     /// </summary>
     private Task _worker = Task.CompletedTask;
+
+    /// <summary>
+    /// Completed when the request opening the conversation gets its response headers, or null when none is opening it.
+    /// </summary>
+    private TaskCompletionSource? _opening;
 
     /// <summary>
     /// Whether <see cref="_worker"/> is running.
@@ -319,11 +324,11 @@ public sealed class A2UIAgentClient : IAsyncDisposable
         string kind = outbound.Kind;
         if (kind is "action" or "error")
         {
-            _ = Enqueue(null, outbound.Message, CancellationToken.None);
+            _ = Enqueue(null, outbound, CancellationToken.None);
             return ValueTask.CompletedTask;
         }
 
-        return new ValueTask(RunOnContextAsync(() => SendWithoutTurnAsync(outbound.Message, kind)));
+        return new ValueTask(RunOnContextAsync(() => SendWithoutTurnAsync(outbound, kind)));
     }
 
     /// <summary>
@@ -336,7 +341,7 @@ public sealed class A2UIAgentClient : IAsyncDisposable
     /// <param name="text">The user's text, or null.</param>
     /// <param name="message">A renderer message, or null.</param>
     /// <param name="cancellationToken">Cancels the turn.</param>
-    private Task Enqueue(string? text, JsonObject? message, CancellationToken cancellationToken)
+    private Task Enqueue(string? text, A2UIOutboundMessage? message, CancellationToken cancellationToken)
     {
         lock (_gate)
         {
@@ -347,7 +352,7 @@ public sealed class A2UIAgentClient : IAsyncDisposable
                 && last.Messages.Count < _maxMessagesPerRequest
                 && last.CancellationToken == cancellationToken)
             {
-                last.Messages.Add(message);
+                last.Add(message);
                 return last.Done.Task;
             }
 
@@ -359,7 +364,7 @@ public sealed class A2UIAgentClient : IAsyncDisposable
             PendingTurn turn = new(text, cancellationToken);
             if (message is not null)
             {
-                turn.Messages.Add(message);
+                turn.Add(message);
             }
 
             _queue.Add(turn);
@@ -475,7 +480,7 @@ public sealed class A2UIAgentClient : IAsyncDisposable
         SetState(A2UIConnectionState.Connecting, null);
         try
         {
-            await ExchangeAsync(turn.Text, turn.Messages, isTurn: true, cancel.Token);
+            await ExchangeAsync(turn.Text, turn.Messages, turn.Metadata, isTurn: true, cancel.Token);
             SetState(A2UIConnectionState.Ended, null);
         }
         catch (OperationCanceledException) when (cancel.IsCancellationRequested)
@@ -496,13 +501,14 @@ public sealed class A2UIAgentClient : IAsyncDisposable
     /// that cannot be sent fails at once instead of waiting for its timeout.
     /// </summary>
     /// <exception cref="Exception">A renderer function response could not be sent; the processor reports it.</exception>
-    /// <param name="message">The message.</param>
+    /// <param name="outbound">The message.</param>
     /// <param name="kind">The message's kind.</param>
-    private async Task SendWithoutTurnAsync(JsonObject message, string kind)
+    private async Task SendWithoutTurnAsync(A2UIOutboundMessage outbound, string kind)
     {
+        JsonObject message = outbound.Message;
         try
         {
-            await ExchangeAsync(null, [message], isTurn: false, _disposed.Token);
+            await ExchangeAsync(null, [message], outbound.Metadata, isTurn: false, _disposed.Token);
         }
         catch (Exception ex) when (kind == "callAgentFunction" && !_disposed.IsCancellationRequested && A2UIValues.AsString(message[kind]?["functionCallId"]) is { } id)
         {
@@ -527,13 +533,42 @@ public sealed class A2UIAgentClient : IAsyncDisposable
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     /// <param name="text">The user's text, or null.</param>
     /// <param name="messages">The renderer's messages.</param>
+    /// <param name="metadata">
+    /// The metadata the processor gave the renderer's messages, with the data model as it was when they were sent; null
+    /// for the user's text, which takes the data model as it is now.
+    /// </param>
     /// <param name="isTurn">Whether the request is a turn, which moves <see cref="State"/> and raises text.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
-    private async Task ExchangeAsync(string? text, List<JsonObject> messages, bool isTurn, CancellationToken cancellationToken)
+    private async Task ExchangeAsync(string? text, List<JsonObject> messages, JsonObject? metadata, bool isTurn, CancellationToken cancellationToken)
     {
-        string? sentId = _conversationId;
-        using HttpRequestMessage request = BuildRequest(text, messages, sentId);
-        using HttpResponseMessage response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        TaskCompletionSource? opening = await WaitForConversationAsync(cancellationToken);
+        HttpResponseMessage response;
+        string? sentId;
+        try
+        {
+            sentId = _conversationId;
+            using HttpRequestMessage request = BuildRequest(text, messages, metadata, sentId);
+            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (response.Headers.TryGetValues(ConversationHeader, out IEnumerable<string>? ids) && ids.FirstOrDefault() is { } id && IsAcceptableConversationId(id))
+            {
+                _conversationId = id;
+            }
+        }
+        finally
+        {
+            // Requests waiting for the conversation go on, with its id or, if this one failed, to open it themselves.
+            if (opening is not null)
+            {
+                lock (_gate)
+                {
+                    _opening = null;
+                }
+
+                opening.TrySetResult();
+            }
+        }
+
+        using HttpResponseMessage answer = response;
         if (!response.IsSuccessStatusCode)
         {
             if (response.StatusCode == HttpStatusCode.NotFound && sentId is not null)
@@ -547,10 +582,6 @@ public sealed class A2UIAgentClient : IAsyncDisposable
         }
 
         bool eventStream = IsEventStream(response.Content.Headers.ContentType?.MediaType);
-        if (response.Headers.TryGetValues(ConversationHeader, out IEnumerable<string>? ids) && ids.FirstOrDefault() is { } id && IsAcceptableConversationId(id))
-        {
-            _conversationId = id;
-        }
 
         if (isTurn)
         {
@@ -572,14 +603,46 @@ public sealed class A2UIAgentClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Waits while another request opens the conversation, so every request joins the same one. When there is no id
+    /// and no request opening one, the caller becomes the opener.
+    /// </summary>
+    /// <returns>The source to complete once the caller's response headers arrive, when it opens the conversation; otherwise null.</returns>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    private async Task<TaskCompletionSource?> WaitForConversationAsync(CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Task wait;
+            lock (_gate)
+            {
+                if (_conversationId is not null)
+                {
+                    return null;
+                }
+
+                if (_opening is null)
+                {
+                    _opening = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    return _opening;
+                }
+
+                wait = _opening.Task;
+            }
+
+            await wait.WaitAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
     /// Builds a request: the text, the messages, and metadata with the renderer's capabilities and the data model of the
     /// surfaces that ask for it.
     /// </summary>
     /// <returns>The request.</returns>
     /// <param name="text">The user's text, or null.</param>
     /// <param name="messages">The renderer's messages.</param>
+    /// <param name="outbound">The processor's metadata for the messages, or null to take the data model as it is now.</param>
     /// <param name="conversationId">The conversation's id, or null.</param>
-    private HttpRequestMessage BuildRequest(string? text, List<JsonObject> messages, string? conversationId)
+    private HttpRequestMessage BuildRequest(string? text, List<JsonObject> messages, JsonObject? outbound, string? conversationId)
     {
         JsonObject body = new();
         if (text is not null)
@@ -599,7 +662,8 @@ public sealed class A2UIAgentClient : IAsyncDisposable
         }
 
         JsonObject metadata = new() { ["a2uiRendererCapabilities"] = _processor.GetRendererCapabilities() };
-        if (_processor.GetRendererDataModel() is { } dataModel)
+        JsonNode? dataModel = outbound is null ? _processor.GetRendererDataModel() : outbound["a2uiRendererDataModel"]?.DeepClone();
+        if (dataModel is not null)
         {
             metadata["a2uiRendererDataModel"] = dataModel;
         }
@@ -653,6 +717,7 @@ public sealed class A2UIAgentClient : IAsyncDisposable
         string? name = null;
         StringBuilder data = new();
         bool hasData = false;
+        int dataBytes = 0;
         while (await reader.ReadLineAsync(cancellationToken) is { } line)
         {
             if (line.Length == 0)
@@ -665,6 +730,7 @@ public sealed class A2UIAgentClient : IAsyncDisposable
                 name = null;
                 data.Clear();
                 hasData = false;
+                dataBytes = 0;
                 continue;
             }
 
@@ -687,6 +753,13 @@ public sealed class A2UIAgentClient : IAsyncDisposable
             }
             else if (field == "data")
             {
+                // The limit counts UTF-8 bytes, as the line limit does: each line's bytes, and one per line break.
+                dataBytes += Encoding.UTF8.GetByteCount(value) + (hasData ? 1 : 0);
+                if (dataBytes > _maxLineLength)
+                {
+                    throw new A2UIAgentStreamException($"The agent sent an event longer than {_maxLineLength} bytes.");
+                }
+
                 if (hasData)
                 {
                     data.Append('\n');
@@ -694,10 +767,6 @@ public sealed class A2UIAgentClient : IAsyncDisposable
 
                 data.Append(value);
                 hasData = true;
-                if (data.Length > _maxLineLength)
-                {
-                    throw new A2UIAgentStreamException($"The agent sent an event longer than {_maxLineLength} bytes.");
-                }
             }
         }
 
@@ -817,6 +886,23 @@ public sealed class A2UIAgentClient : IAsyncDisposable
         /// Gets the renderer's messages.
         /// </summary>
         public List<JsonObject> Messages { get; } = [];
+
+        /// <summary>
+        /// Gets the processor's metadata for the latest message, whose data model is the newest the batch saw; null for
+        /// a turn of text only.
+        /// </summary>
+        public JsonObject? Metadata { get; private set; }
+
+        /// <summary>
+        /// Adds a renderer message to the turn. The batch takes the latest message's metadata, so the agent sees the
+        /// data model as it was at the last action, not as it is when the request leaves.
+        /// </summary>
+        /// <param name="message">The message.</param>
+        public void Add(A2UIOutboundMessage message)
+        {
+            Messages.Add(message.Message);
+            Metadata = message.Metadata ?? [];
+        }
 
         /// <summary>
         /// Gets the token that cancels the turn.
