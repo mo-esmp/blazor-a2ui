@@ -16,9 +16,12 @@
   client's request, answers the renderer's messages, runs the turn and streams the answer as JSON Lines or server-sent
   events, keeping each conversation's surfaces and pending renderer calls. It adds only the ASP.NET Core shared
   framework.
+* `samples/SampleAgent` is a runnable agent on the endpoint. It is the only project that uses `Microsoft.Extensions.AI`,
+  and samples are never packed.
 * `tests/BlazorA2UI.Core.Tests` holds the unit tests and the conformance tests. `tests/BlazorA2UI.Tests`,
-  `tests/BlazorA2UI.Agent.Tests` and `tests/BlazorA2UI.Agent.AspNetCore.Tests` test the components, the agent side and
-  the endpoint. The endpoint tests run Kestrel on a free local port, so they need no test-host package.
+  `tests/BlazorA2UI.Agent.Tests`, `tests/BlazorA2UI.Agent.AspNetCore.Tests` and `tests/BlazorA2UI.SampleAgent.Tests`
+  test the components, the agent side, the endpoint and the sample agent. The endpoint and sample tests run Kestrel on
+  a free local port, so they need no test-host package.
 
 ## Safety
 

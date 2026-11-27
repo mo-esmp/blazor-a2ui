@@ -10,7 +10,8 @@ keeps a data model, and sends the user's actions back.
 > suites, and the Razor components (`BlazorA2UI`) render the whole basic catalog. The agent side
 > (`BlazorA2UI.Agent`) has its builders, validator, LLM prompts and response parsing, and the
 > messages that flow back from the renderer, `BlazorA2UI.Agent.AspNetCore` serves an agent
-> over HTTP, and `A2UIAgentClient` connects a Blazor app to it; the samples are in progress.
+> over HTTP, and `A2UIAgentClient` connects a Blazor app to it. A sample agent runs it all; the
+> sample renderer apps are in progress.
 > Names may still change before the first release.
 >
 > | Part | Package | State |
@@ -22,7 +23,8 @@ keeps a data model, and sends the user's actions back.
 > | Agent side: LLM prompts and response parsing | `BlazorA2UI.Agent` | Done |
 > | Streaming endpoint for ASP.NET Core | `BlazorA2UI.Agent.AspNetCore` | Done |
 > | Renderer-side client for the endpoint | `BlazorA2UI` | Done |
-> | Sample apps | `samples/` | Planned |
+> | Sample agent | `samples/SampleAgent` | Done |
+> | Sample renderer apps (Blazor Server, WebAssembly) | `samples/` | Planned |
 
 ## Safety rules
 
@@ -209,7 +211,9 @@ origin (CORS, below).
 | `tests/BlazorA2UI.Agent.Tests` | | Tests for the agent side, including a strict check of every basic component and round trips against the renderer core. |
 | `src/BlazorA2UI.Agent.AspNetCore` | `BlazorA2UI.Agent.AspNetCore` | The streaming endpoint for ASP.NET Core. |
 | `tests/BlazorA2UI.Agent.AspNetCore.Tests` | | Tests for the endpoint over real HTTP. |
-| `samples/` | | Blazor Server and WebAssembly sample apps and a sample agent. Planned. |
+| `samples/SampleAgent` | | A table-booking agent on the streaming endpoint, with a real model or an offline script. See its [README](samples/SampleAgent/README.md). |
+| `tests/BlazorA2UI.SampleAgent.Tests` | | Tests for the sample agent over real HTTP with the library's client. |
+| `samples/` | | Blazor Server and WebAssembly sample apps. Planned. |
 
 ## Building UI on the agent side
 
