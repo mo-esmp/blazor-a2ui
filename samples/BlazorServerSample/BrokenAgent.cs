@@ -66,6 +66,7 @@ internal static class BrokenAgent
         await context.Response.Body.FlushAsync(context.RequestAborted);
         if (mode == Drop)
         {
+            // The reset can discard bytes the client has not read yet, so the first message may not arrive either.
             context.Abort();
         }
     }

@@ -14,8 +14,7 @@ namespace BlazorA2UI.Tests.BlazorServerSample;
 public sealed class BrokenAgentTests
 {
     /// <summary>
-    /// Proves that each kind of break fails the turn with its own clear error, after the complete message before it
-    /// was processed.
+    /// Proves that each kind of break fails the turn with its own clear error.
     /// </summary>
     /// <param name="mode">How the answer breaks.</param>
     /// <param name="expected">The error the client reports.</param>
@@ -36,6 +35,25 @@ public sealed class BrokenAgentTests
         // Assert
         client.State.ShouldBe(A2UIConnectionState.Failed);
         client.LastError.ShouldBe(expected);
+    }
+
+    /// <summary>
+    /// Proves that the complete message before a cut is processed. A dropped connection gives no such promise, because
+    /// the reset can discard bytes the client has not read yet.
+    /// </summary>
+    [Fact]
+    public async Task Turn_CutAnswer_KeepsCompleteMessage()
+    {
+        // Arrange
+        await using WebApplication app = await StartAsync();
+        using MessageProcessor processor = new([BasicCatalog.Create()]);
+        using HttpClient http = new();
+        await using A2UIAgentClient client = new(http, processor, new A2UIAgentClientOptions { Endpoint = new Uri(Address(app), $"broken-agent/{BrokenAgent.Cut}") });
+
+        // Act
+        await client.SendTextAsync("Hello");
+
+        // Assert
         processor.Surfaces.ContainsKey(BrokenAgent.SurfaceId).ShouldBeTrue();
     }
 
