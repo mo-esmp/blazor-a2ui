@@ -9,9 +9,9 @@ keeps a data model, and sends the user's actions back.
 > **Status: preview.** The protocol core (`BlazorA2UI.Core`) passes Google's conformance
 > suites, and the Razor components (`BlazorA2UI`) render the whole basic catalog. The agent side
 > (`BlazorA2UI.Agent`) has its builders, validator, LLM prompts and response parsing, and the
-> messages that flow back from the renderer, and `BlazorA2UI.Agent.AspNetCore` serves an agent
-> over HTTP; the renderer-side client and the samples are in progress. Names may still change
-> before the first release.
+> messages that flow back from the renderer, `BlazorA2UI.Agent.AspNetCore` serves an agent
+> over HTTP, and `A2UIAgentClient` connects a Blazor app to it; the samples are in progress.
+> Names may still change before the first release.
 >
 > | Part | Package | State |
 > | --- | --- | --- |
@@ -21,7 +21,8 @@ keeps a data model, and sends the user's actions back.
 > | Agent side: messages from the renderer, agent functions, renderer function calls | `BlazorA2UI.Agent` | Done |
 > | Agent side: LLM prompts and response parsing | `BlazorA2UI.Agent` | Done |
 > | Streaming endpoint for ASP.NET Core | `BlazorA2UI.Agent.AspNetCore` | Done |
-> | Renderer-side client for the endpoint, and sample apps | `BlazorA2UI`, `samples/` | Planned |
+> | Renderer-side client for the endpoint | `BlazorA2UI` | Done |
+> | Sample apps | `samples/` | Planned |
 
 ## Safety rules
 
@@ -133,26 +134,64 @@ WebAssembly):
 }
 ```
 
-**5. Stream the agent's messages** into the scoped processor:
+**5. Connect to the agent.** Register the client with the agent endpoint's URL, which comes from
+your app and never from a message:
 
 ```csharp
-@inject MessageProcessor Processor
-@inject HttpClient Http
+using BlazorA2UI.Client;
 
-protected override async Task OnInitializedAsync()
+builder.Services.AddA2UIAgentClient(options =>
 {
-    using HttpResponseMessage response = await Http.GetAsync(
-        "https://my-agent/stream", HttpCompletionOption.ResponseHeadersRead);
-    using StreamReader reader = new(await response.Content.ReadAsStreamAsync());
-    while (await reader.ReadLineAsync() is { } line)
-    {
-        Processor.ProcessLine(line);   // <A2UISurface> re-renders as messages arrive
-    }
+    options.Endpoint = new Uri("https://my-agent/a2ui");
+    options.Format = A2UIAgentStreamFormat.EventStream;   // also receive the agent's text
+});
+```
+
+It uses the `HttpClient` registered in the app's services, as a WebAssembly app has. In Blazor
+Server, pass one: `AddA2UIAgentClient(configure, provider => provider.GetRequiredService<IHttpClientFactory>().CreateClient("agent"))`.
+
+Then send the user's text from a component:
+
+```razor
+@using BlazorA2UI.Client
+@inject A2UIAgentClient Agent
+@implements IDisposable
+
+<A2UISurface SurfaceId="main" />
+<p>@Agent.State @Agent.LastError</p>
+
+@code {
+    protected override void OnInitialized() => Agent.StateChanged += Refresh;
+
+    // Call it from your input's submit handler.
+    private Task Ask(string text) => Agent.SendTextAsync(text);
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Agent.StateChanged -= Refresh;
 }
 ```
 
-In Blazor Server the stream is read on the server; in WebAssembly it is read in the browser, so
-the agent endpoint must allow your app's origin (CORS).
+The client streams the agent's answer into the scoped `MessageProcessor` as it arrives, so
+`<A2UISurface>` re-renders as messages land. It sends the user's actions and the renderer's
+errors back as the next turn (one at a time; actions that wait together go in one request), and
+sends agent function calls and renderer function responses at once, even while a turn streams. It
+keeps the conversation's id between requests and forgets it when the agent says it expired.
+
+- **Text.** Over server-sent events the agent's text arrives through `TextReceived`. It comes
+  from the model, so show it as text, never as markup.
+- **State.** `State` is `Idle`, `Connecting`, `Streaming`, `Ended`, `Cancelled` or `Failed`;
+  `LastError` says why a turn failed, in words you can show. `CancelTurns()` stops the running
+  turn and drops the waiting ones.
+- **Limits.** A line or event over `MaxLineLength` (1 MiB), a stream that ends in the middle of a
+  message, a body that is not UTF-8, and a stream that sends nothing for `ReadTimeout` (2 minutes)
+  all fail the turn with a clear error instead of hanging. At most `MaxQueuedTurns` (16) turns
+  wait.
+- **Threads.** The client works on the synchronization context it was created on, so inject it
+  into a component and it processes messages on the renderer's thread.
+
+In WebAssembly the stream is read in the browser, so the agent endpoint must allow your app's
+origin (CORS, below).
 
 ## Projects
 
@@ -160,7 +199,7 @@ the agent endpoint must allow your app's origin (CORS).
 | --- | --- | --- |
 | `src/BlazorA2UI.Core` | `BlazorA2UI.Core` | The protocol engine. No UI dependency. |
 | `tests/BlazorA2UI.Core.Tests` | | Unit and conformance tests. |
-| `src/BlazorA2UI` | `BlazorA2UI` | Razor components, the media allowlist and `a2ui.css`. |
+| `src/BlazorA2UI` | `BlazorA2UI` | Razor components, the media allowlist, `a2ui.css` and the agent client. |
 | `tests/BlazorA2UI.Tests` | | bUnit tests for the components and the rendering safety rules. |
 | `src/BlazorA2UI.Agent` | `BlazorA2UI.Agent` | Agent-side builders, writer, validator, LLM prompts and response parsing, and handling of the renderer's messages. No dependency beyond the core. |
 | `tests/BlazorA2UI.Agent.Tests` | | Tests for the agent side, including a strict check of every basic component and round trips against the renderer core. |
