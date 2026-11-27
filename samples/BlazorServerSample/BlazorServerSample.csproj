@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>BlazorA2UI.BlazorServerSample</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BlazorA2UI.BlazorServerSample.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The sample agent's catalog, shared as source so both sides declare the same functions. -->
+    <Compile Include="..\SampleAgent\SampleCatalog.cs" Link="SampleCatalog.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BlazorA2UI\BlazorA2UI.csproj" />
+  </ItemGroup>
+
+</Project>

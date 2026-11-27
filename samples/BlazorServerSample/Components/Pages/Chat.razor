@@ -1,0 +1,226 @@
+@page "/"
+@implements IDisposable
+@inject A2UIAgentClient Agent
+@inject MessageProcessor Processor
+
+<PageTitle>Chat with the agent</PageTitle>
+
+<h1>Chat with the agent</h1>
+<p class="hint">
+    Start the sample agent first: <code>dotnet run --project samples/SampleAgent</code>. Without an API key it answers
+    from a script, so try "Book a table".
+</p>
+
+<ol class="transcript" aria-live="polite">
+    @foreach (Entry entry in _transcript)
+    {
+        <li class="@entry.Kind">@entry.Text</li>
+    }
+</ol>
+
+<div class="surfaces">
+    @foreach (string surfaceId in _surfaces)
+    {
+        <A2UISurface @key="surfaceId" SurfaceId="@surfaceId" />
+    }
+</div>
+
+<form class="composer" @onsubmit="SendAsync">
+    <input @bind="_input" maxlength="@MaxInputLength" placeholder="Ask the agent" aria-label="Message" />
+    <button type="submit" disabled="@IsBusy">Send</button>
+    <button type="button" disabled="@(!IsBusy)" @onclick="Agent.CancelTurns">Stop</button>
+</form>
+
+<p class="status" role="status">@StatusText</p>
+@if ((_error ?? Agent.LastError) is { } error)
+{
+    <p class="error" role="alert">@error</p>
+}
+
+@code {
+    /// <summary>
+    /// The longest message the user can type.
+    /// </summary>
+    private const int MaxInputLength = 2000;
+
+    /// <summary>
+    /// The most entries the transcript keeps.
+    /// </summary>
+    private const int MaxEntries = 50;
+
+    /// <summary>
+    /// The longest text kept for one of the agent's entries.
+    /// </summary>
+    private const int MaxEntryLength = 10_000;
+
+    /// <summary>
+    /// What the user said and the agent's text, oldest first.
+    /// </summary>
+    private readonly List<Entry> _transcript = [];
+
+    /// <summary>
+    /// The surfaces to show, in the order the agent created them.
+    /// </summary>
+    private readonly List<string> _surfaces = [];
+
+    /// <summary>
+    /// The text being typed.
+    /// </summary>
+    private string _input = string.Empty;
+
+    /// <summary>
+    /// The entry the agent's text goes into during the current turn, or null before it sends any.
+    /// </summary>
+    private Entry? _answer;
+
+    /// <summary>
+    /// An error from sending, such as too many waiting turns, or null.
+    /// </summary>
+    private string? _error;
+
+    /// <summary>
+    /// Gets whether a turn is running.
+    /// </summary>
+    private bool IsBusy => Agent.State is A2UIConnectionState.Connecting or A2UIConnectionState.Streaming;
+
+    /// <summary>
+    /// Gets the line that says where the turn stands.
+    /// </summary>
+    private string StatusText => Agent.State switch
+    {
+        A2UIConnectionState.Connecting => "Connecting to the agent…",
+        A2UIConnectionState.Streaming => "The agent is answering…",
+        A2UIConnectionState.Ended => "Done.",
+        A2UIConnectionState.Cancelled => "Stopped.",
+        A2UIConnectionState.Failed => "The turn failed.",
+        _ => "Ready.",
+    };
+
+    /// <summary>
+    /// Subscribes to the client and the processor, and shows the surfaces that already exist.
+    /// </summary>
+    protected override void OnInitialized()
+    {
+        _surfaces.AddRange(Processor.Surfaces.Keys.Order(StringComparer.Ordinal));
+        Agent.StateChanged += OnStateChanged;
+        Agent.TextReceived += OnTextReceived;
+        Processor.SurfaceCreated += OnSurfaceCreated;
+        Processor.SurfaceDeleted += OnSurfaceDeleted;
+    }
+
+    /// <summary>
+    /// Sends the typed text as a turn.
+    /// </summary>
+    private async Task SendAsync()
+    {
+        string text = _input.Trim();
+        if (text.Length == 0)
+        {
+            return;
+        }
+
+        _input = string.Empty;
+        _error = null;
+        _answer = null;
+        Add(new Entry("user", text));
+        try
+        {
+            await Agent.SendTextAsync(text);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Adds the agent's text to its entry for this turn. The text comes from the model, so it is shown as text.
+    /// </summary>
+    /// <param name="text">A piece of the agent's text.</param>
+    private void OnTextReceived(string text)
+    {
+        if (_answer is null)
+        {
+            _answer = new Entry("agent", string.Empty);
+            Add(_answer);
+        }
+
+        if (_answer.Text.Length < MaxEntryLength)
+        {
+            _answer.Text += text.Length <= MaxEntryLength - _answer.Text.Length ? text : text[..(MaxEntryLength - _answer.Text.Length)];
+        }
+
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Adds an entry, dropping the oldest past the limit.
+    /// </summary>
+    /// <param name="entry">The entry.</param>
+    private void Add(Entry entry)
+    {
+        _transcript.Add(entry);
+        if (_transcript.Count > MaxEntries)
+        {
+            _transcript.RemoveAt(0);
+        }
+    }
+
+    /// <summary>
+    /// Shows a surface the agent created.
+    /// </summary>
+    /// <param name="surface">The surface.</param>
+    private void OnSurfaceCreated(Surface surface) => _ = InvokeAsync(() =>
+    {
+        if (!_surfaces.Contains(surface.SurfaceId))
+        {
+            _surfaces.Add(surface.SurfaceId);
+        }
+
+        StateHasChanged();
+    });
+
+    /// <summary>
+    /// Stops showing a surface the agent deleted.
+    /// </summary>
+    /// <param name="surface">The surface.</param>
+    private void OnSurfaceDeleted(Surface surface) => _ = InvokeAsync(() =>
+    {
+        _surfaces.Remove(surface.SurfaceId);
+        StateHasChanged();
+    });
+
+    /// <summary>
+    /// Re-renders when the turn moves on.
+    /// </summary>
+    private void OnStateChanged() => _ = InvokeAsync(StateHasChanged);
+
+    /// <summary>
+    /// Unsubscribes from the client and the processor, which live as long as the circuit.
+    /// </summary>
+    public void Dispose()
+    {
+        Agent.StateChanged -= OnStateChanged;
+        Agent.TextReceived -= OnTextReceived;
+        Processor.SurfaceCreated -= OnSurfaceCreated;
+        Processor.SurfaceDeleted -= OnSurfaceDeleted;
+    }
+
+    /// <summary>
+    /// One line of the transcript.
+    /// </summary>
+    /// <param name="kind">Who wrote it: <c>user</c> or <c>agent</c>, also its CSS class.</param>
+    /// <param name="text">The text.</param>
+    private sealed class Entry(string kind, string text)
+    {
+        /// <summary>
+        /// Gets who wrote the line.
+        /// </summary>
+        public string Kind { get; } = kind;
+
+        /// <summary>
+        /// Gets or sets the text, which grows as the agent's answer streams.
+        /// </summary>
+        public string Text { get; set; } = text;
+    }
+}

@@ -1,0 +1,91 @@
+@page "/errors"
+@implements IAsyncDisposable
+@inject IHttpClientFactory HttpClients
+@inject NavigationManager Navigation
+
+<PageTitle>Broken streams</PageTitle>
+
+<h1>Broken streams</h1>
+<p class="hint">
+    These buttons talk to a pretend agent in this app whose answers break. The client keeps what arrived, ends the
+    turn as failed and says why, instead of waiting forever or showing half a message.
+</p>
+
+<p>
+    <button type="button" disabled="@IsBusy" @onclick="() => RunAsync(BrokenAgent.Cut)">An answer that stops mid-message</button>
+    <button type="button" disabled="@IsBusy" @onclick="() => RunAsync(BrokenAgent.Drop)">A connection that drops</button>
+</p>
+
+@if (_processor is not null)
+{
+    <A2UISurface SurfaceId="@BrokenAgent.SurfaceId" Processor="_processor" />
+}
+
+@if (_client is not null)
+{
+    <p class="status" role="status">State: @_client.State</p>
+    @if (_client.LastError is { } error)
+    {
+        <p class="error" role="alert">@error</p>
+    }
+}
+
+@code {
+    /// <summary>
+    /// The processor of the latest try, or null before the first.
+    /// </summary>
+    private MessageProcessor? _processor;
+
+    /// <summary>
+    /// The client of the latest try, or null before the first.
+    /// </summary>
+    private A2UIAgentClient? _client;
+
+    /// <summary>
+    /// Gets whether a try is running.
+    /// </summary>
+    private bool IsBusy => _client?.State is A2UIConnectionState.Connecting or A2UIConnectionState.Streaming;
+
+    /// <summary>
+    /// Sends one turn to the pretend agent, with a fresh processor and client so each try starts clean.
+    /// </summary>
+    /// <param name="mode">How the answer breaks.</param>
+    private async Task RunAsync(string mode)
+    {
+        await ReleaseAsync();
+        _processor = new MessageProcessor([BasicCatalog.Create()]);
+        _client = new A2UIAgentClient(HttpClients.CreateClient(SampleRenderer.HttpClientName), _processor, new A2UIAgentClientOptions
+        {
+            // The endpoint is this app's own address, never one from a message.
+            Endpoint = Navigation.ToAbsoluteUri($"broken-agent/{mode}"),
+        });
+        _client.StateChanged += OnStateChanged;
+        await _client.SendTextAsync("Hello");
+    }
+
+    /// <summary>
+    /// Re-renders when the try moves on.
+    /// </summary>
+    private void OnStateChanged() => _ = InvokeAsync(StateHasChanged);
+
+    /// <summary>
+    /// Releases the latest try's client and processor.
+    /// </summary>
+    private async Task ReleaseAsync()
+    {
+        if (_client is not null)
+        {
+            _client.StateChanged -= OnStateChanged;
+            await _client.DisposeAsync();
+            _client = null;
+        }
+
+        _processor?.Dispose();
+        _processor = null;
+    }
+
+    /// <summary>
+    /// Releases the latest try when the page closes.
+    /// </summary>
+    public async ValueTask DisposeAsync() => await ReleaseAsync();
+}
