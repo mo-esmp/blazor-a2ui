@@ -74,7 +74,7 @@ public sealed class A2UIAgentTurn
 
     /// <summary>
     /// Gets the request's <c>metadata</c> object, or null. It may hold the renderer's data model
-    /// (<c>a2uiClientDataModel</c>) or capabilities. It comes from the client, so treat it as untrusted.
+    /// (<c>a2uiRendererDataModel</c>) or capabilities. It comes from the client, so treat it as untrusted.
     /// </summary>
     public JsonObject? Metadata { get; }
 

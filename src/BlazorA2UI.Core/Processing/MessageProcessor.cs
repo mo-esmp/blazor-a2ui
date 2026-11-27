@@ -1170,13 +1170,40 @@ public sealed class MessageProcessor : IDisposable
             return;
         }
 
+        RemoveSurface(surface, "The surface was deleted.");
+    }
+
+    /// <summary>
+    /// Removes every surface as if the agent had deleted each one, for a client whose conversation with the agent ended:
+    /// a new conversation knows none of them, and may reuse their ids. Raises <see cref="SurfaceDeleted"/> for each.
+    /// </summary>
+    /// <param name="reason">Why the surfaces' pending agent calls are cancelled.</param>
+    internal void DeleteAllSurfaces(string reason)
+    {
+        foreach (string surfaceId in _surfaces.Keys)
+        {
+            if (_surfaces.TryRemove(surfaceId, out Surface? surface))
+            {
+                RemoveSurface(surface, reason);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Finishes removing a surface taken out of <see cref="_surfaces"/>: frees its id, cancels its agent calls, detaches
+    /// its observers and raises <see cref="SurfaceDeleted"/>.
+    /// </summary>
+    /// <param name="surface">The surface.</param>
+    /// <param name="reason">Why its pending agent calls are cancelled.</param>
+    private void RemoveSurface(Surface surface, string reason)
+    {
         lock (_reservedSurfaceIds)
         {
-            _reservedSurfaceIds.Remove(surfaceId);
+            _reservedSurfaceIds.Remove(surface.SurfaceId);
         }
 
         surface.IsDeleted = true;
-        surface.AgentCalls.CancelAll("The surface was deleted.");
+        surface.AgentCalls.CancelAll(reason);
         surface.LocalCalls.Clear();
         surface.DataModel.DisposeObservers();
         SurfaceDeleted?.Invoke(surface);

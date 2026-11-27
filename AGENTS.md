@@ -8,7 +8,7 @@
   functions, catalogs, validation, and calls in both directions (`callAgentFunction` and `callRendererFunction`). It has
   no UI dependency.
 * `src/BlazorA2UI` (package `BlazorA2UI`) holds the basic catalog as Razor components and enforces the rendering rules
-  below.
+  below. Its `A2UIAgentClient` connects the scoped processor to an agent endpoint over `HttpClient`.
 * `src/BlazorA2UI.Agent` (package `BlazorA2UI.Agent`) is for the agent side: component and message builders, a JSONL
   writer, a validator, the LLM prompt builder and response parsers, the processor for messages from the renderer
   (actions, errors, agent functions) and renderer function calls. It depends on nothing but the core.

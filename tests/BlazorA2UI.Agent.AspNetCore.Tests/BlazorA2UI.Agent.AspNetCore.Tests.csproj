@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\BlazorA2UI.Agent.AspNetCore\BlazorA2UI.Agent.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\BlazorA2UI\BlazorA2UI.csproj" />
   </ItemGroup>
 
   <ItemGroup>
