@@ -1183,6 +1183,27 @@ public sealed class MessageProcessor : IDisposable
     }
 
     /// <summary>
+    /// Puts back a surface that <c>deleteSurface</c> removed, for a mirror that takes back a deletion the renderer
+    /// never received. Its observers and pending calls stay gone.
+    /// </summary>
+    /// <returns>False when another surface has taken the id since.</returns>
+    /// <param name="surface">The deleted surface.</param>
+    internal bool RestoreDeletedSurface(Surface surface)
+    {
+        lock (_reservedSurfaceIds)
+        {
+            if (!_reservedSurfaceIds.Add(surface.SurfaceId))
+            {
+                return false;
+            }
+        }
+
+        surface.IsDeleted = false;
+        _surfaces[surface.SurfaceId] = surface;
+        return true;
+    }
+
+    /// <summary>
     /// Handles <c>agentFunctionResponse</c> by settling the matching pending call.
     /// </summary>
     /// <exception cref="A2UIException">The response is malformed.</exception>

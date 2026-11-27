@@ -360,6 +360,93 @@ public sealed class A2UIMessageValidatorTests
     }
 
     /// <summary>
+    /// Proves that a <c>createSurface</c> the renderer would apply in part, reporting an unknown component under strict rules, leaves no
+    /// surface in the mirror, so the same surface can be created again.
+    /// </summary>
+    [Fact]
+    public void ValidateAtomically_RejectedCreate_LeavesNoSurface()
+    {
+        // Arrange
+        using A2UIMessageValidator validator = new([BasicCatalog.Create()], A2UIValidationConfig.Strict);
+
+        // Act
+        A2UIValidationResult rejected = validator.ValidateAtomically(A2UIMessages.CreateSurface("main", new Custom()), out _);
+        A2UIValidationResult retried = validator.ValidateAtomically(A2UIMessages.CreateSurface("main", new Text { Content = "Hi" }), out _);
+
+        // Assert
+        rejected.IsValid.ShouldBeFalse();
+        retried.IsValid.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Proves that an <c>updateComponents</c> the renderer would apply in part leaves the surface's components as they
+    /// were, without the valid components of the rejected update.
+    /// </summary>
+    [Fact]
+    public void ValidateAtomically_RejectedUpdate_KeepsComponents()
+    {
+        // Arrange
+        using A2UIMessageValidator validator = new([BasicCatalog.Create()], A2UIValidationConfig.Strict);
+        validator.Validate(A2UIMessages.CreateSurface("main", new Text { Content = "Hi" })).IsValid.ShouldBeTrue();
+        JsonObject update = A2UIMessages.UpdateComponents("main", [new Text { Id = "extra", Content = "More" }, new Custom { Id = "chart" }]);
+
+        // Act
+        A2UIValidationResult result = validator.ValidateAtomically(update, out _);
+
+        // Assert
+        result.IsValid.ShouldBeFalse();
+        validator.Surfaces["main"].Components.Keys.ShouldBe(["root"]);
+    }
+
+    /// <summary>
+    /// Proves that <see cref="A2UIMessageValidator.Restore"/> takes valid messages back out: a created surface is
+    /// deleted, and an update's components and a data model write are undone.
+    /// </summary>
+    [Fact]
+    public void Restore_ValidMessages_TakesThemBack()
+    {
+        // Arrange
+        using A2UIMessageValidator validator = new();
+        validator.ValidateAtomically(A2UIMessages.CreateSurface("other", new Text { Content = "Hi" }), out A2UIMessageValidator.Checkpoint created);
+        validator.Validate(A2UIMessages.CreateSurface("main", new Text { Content = "Hi" }, dataModel: new JsonObject { ["name"] = "Ada" }));
+        validator.ValidateAtomically(A2UIMessages.UpdateComponents("main", [new Text { Id = "extra", Content = "More" }]), out A2UIMessageValidator.Checkpoint updated);
+        validator.ValidateAtomically(A2UIMessages.UpdateDataModel("main", "/name", "Grace"), out A2UIMessageValidator.Checkpoint written);
+
+        // Act
+        validator.Restore(written);
+        validator.Restore(updated);
+        validator.Restore(created);
+
+        // Assert
+        validator.Surfaces.ContainsKey("other").ShouldBeFalse();
+        validator.Surfaces["main"].Components.Keys.ShouldBe(["root"]);
+
+        // The surface was created with a name, so the value is there.
+        validator.Surfaces["main"].DataModel.Get("/name")!.GetValue<string>().ShouldBe("Ada");
+    }
+
+    /// <summary>
+    /// Proves that <see cref="A2UIMessageValidator.Restore"/> takes a <c>deleteSurface</c> back, so the surface can be
+    /// updated again.
+    /// </summary>
+    [Fact]
+    public void Restore_Delete_PutsSurfaceBack()
+    {
+        // Arrange
+        using A2UIMessageValidator validator = new();
+        validator.Validate(A2UIMessages.CreateSurface("main", new Text { Content = "Hi" }));
+        validator.ValidateAtomically(A2UIMessages.DeleteSurface("main"), out A2UIMessageValidator.Checkpoint deleted);
+
+        // Act
+        validator.Restore(deleted);
+
+        // Assert
+        validator.Surfaces.ContainsKey("main").ShouldBeTrue();
+        validator.Validate(A2UIMessages.UpdateDataModel("main", "/name", "Ada")).IsValid.ShouldBeTrue();
+        validator.Validate(A2UIMessages.CreateSurface("main", new Text { Content = "Again" })).IsValid.ShouldBeFalse();
+    }
+
+    /// <summary>
     /// A component the basic catalog does not define.
     /// </summary>
     private sealed class Custom : A2UIComponent

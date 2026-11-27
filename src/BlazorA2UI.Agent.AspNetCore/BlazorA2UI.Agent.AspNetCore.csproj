@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>BlazorA2UI.Agent.AspNetCore</PackageId>
+    <Description>An ASP.NET Core endpoint for A2UI v1.0 agents: it receives the renderer's messages, runs the agent's turn and streams its messages back as JSON Lines or server-sent events, checking each one the way a renderer would.</Description>
+    <RootNamespace>BlazorA2UI.Agent</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BlazorA2UI.Agent.AspNetCore.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorA2UI.Agent\BlazorA2UI.Agent.csproj" />
+  </ItemGroup>
+
+</Project>

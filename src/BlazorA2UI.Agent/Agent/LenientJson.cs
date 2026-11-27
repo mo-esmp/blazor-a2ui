@@ -90,7 +90,7 @@ internal static class LenientJson
     /// unpaired surrogate such as <c>\ud800</c> would otherwise throw later, when a caller reads it.
     /// </summary>
     /// <param name="node">The parsed JSON.</param>
-    private static bool HasValidStrings(JsonNode? node)
+    internal static bool HasValidStrings(JsonNode? node)
     {
         try
         {
