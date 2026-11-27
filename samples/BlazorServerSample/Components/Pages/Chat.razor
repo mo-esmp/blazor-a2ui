@@ -119,9 +119,15 @@
             return;
         }
 
+        // The input's maxlength is only a hint to the browser, so the limit is checked here as well.
+        if (text.Length > MaxInputLength)
+        {
+            _error = $"The message is longer than {MaxInputLength:N0} characters.";
+            return;
+        }
+
         _input = string.Empty;
         _error = null;
-        _answer = null;
         Add(new Entry("user", text));
         try
         {
@@ -191,9 +197,18 @@
     });
 
     /// <summary>
-    /// Re-renders when the turn moves on.
+    /// Starts a new agent entry when a turn starts, whether typed text or a surface's action started it, and
+    /// re-renders when the turn moves on.
     /// </summary>
-    private void OnStateChanged() => _ = InvokeAsync(StateHasChanged);
+    private void OnStateChanged()
+    {
+        if (Agent.State is A2UIConnectionState.Connecting)
+        {
+            _answer = null;
+        }
+
+        _ = InvokeAsync(StateHasChanged);
+    }
 
     /// <summary>
     /// Unsubscribes from the client and the processor, which live as long as the circuit.

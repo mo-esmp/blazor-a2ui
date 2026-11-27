@@ -25,8 +25,9 @@ README to use a model.
   shows the client's error.
 - **Media** (`/media`) renders a local surface with two images. The one under the app's own `/media/` folder is on
   the allowlist and loads; the other is blocked, and the browser never requests it.
-- **Errors** (`/errors`) calls a pretend agent inside this app whose answers break, once in the middle of a
-  message and once by dropping the connection, and shows what the client reports.
+- **Errors** (`/errors`) calls a pretend agent whose answers break, once in the middle of a message and once by
+  dropping the connection, and shows what the client reports. The pretend agent is the client's `HttpClient`
+  handler, so no request leaves the app.
 
 ## Settings
 

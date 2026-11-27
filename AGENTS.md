@@ -21,8 +21,8 @@
   `A2UIAgentClient`; it links the agent's `SampleCatalog.cs` instead of referencing the agent project.
 * `tests/BlazorA2UI.Core.Tests` holds the unit tests and the conformance tests. `tests/BlazorA2UI.Tests`,
   `tests/BlazorA2UI.Agent.Tests`, `tests/BlazorA2UI.Agent.AspNetCore.Tests`, `tests/BlazorA2UI.SampleAgent.Tests` and
-  `tests/BlazorA2UI.BlazorServerSample.Tests` test the components, the agent side, the endpoint and the samples. The endpoint and sample tests run Kestrel on
-  a free local port, so they need no test-host package.
+  `tests/BlazorA2UI.BlazorServerSample.Tests` test the components, the agent side, the endpoint and the samples. The
+  endpoint and sample agent tests run Kestrel on a free local port, so they need no test-host package.
 
 ## Safety
 

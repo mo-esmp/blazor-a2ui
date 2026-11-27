@@ -215,7 +215,7 @@ origin (CORS, below).
 | `samples/SampleAgent` | | A table-booking agent on the streaming endpoint, with a real model or an offline script. See its [README](samples/SampleAgent/README.md). |
 | `tests/BlazorA2UI.SampleAgent.Tests` | | Tests for the sample agent over real HTTP with the library's client. |
 | `samples/BlazorServerSample` | | A Blazor Server app that chats with the sample agent and shows the media allowlist and stream errors. See its [README](samples/BlazorServerSample/README.md). |
-| `tests/BlazorA2UI.BlazorServerSample.Tests` | | bUnit tests for its pages and Kestrel tests for its broken pretend agent. |
+| `tests/BlazorA2UI.BlazorServerSample.Tests` | | bUnit tests for its pages, and tests for its renderer wiring and broken pretend agent. |
 | `samples/` | | A WebAssembly sample app. Planned. |
 
 ## Building UI on the agent side

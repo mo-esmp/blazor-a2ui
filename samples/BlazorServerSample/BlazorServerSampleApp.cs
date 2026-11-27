@@ -36,7 +36,6 @@ internal static class BlazorServerSampleApp
         app.UseAntiforgery();
         app.MapStaticAssets();
         app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
-        app.MapPost(BrokenAgent.Route, BrokenAgent.HandleAsync);
         return app;
     }
 }

@@ -1,13 +1,11 @@
 @page "/errors"
 @implements IAsyncDisposable
-@inject IHttpClientFactory HttpClients
-@inject NavigationManager Navigation
 
 <PageTitle>Broken streams</PageTitle>
 
 <h1>Broken streams</h1>
 <p class="hint">
-    These buttons talk to a pretend agent in this app whose answers break. The client keeps what arrived, ends the
+    These buttons talk to a pretend agent inside this app whose answers break; no request leaves the app. The client keeps what arrived, ends the
     turn as failed and says why, instead of waiting forever or showing half a message.
 </p>
 
@@ -37,6 +35,11 @@
     private MessageProcessor? _processor;
 
     /// <summary>
+    /// The HTTP client of the latest try, whose handler is the pretend agent, or null before the first.
+    /// </summary>
+    private HttpClient? _http;
+
+    /// <summary>
     /// The client of the latest try, or null before the first.
     /// </summary>
     private A2UIAgentClient? _client;
@@ -54,11 +57,8 @@
     {
         await ReleaseAsync();
         _processor = new MessageProcessor([BasicCatalog.Create()]);
-        _client = new A2UIAgentClient(HttpClients.CreateClient(SampleRenderer.HttpClientName), _processor, new A2UIAgentClientOptions
-        {
-            // The endpoint is this app's own address, never one from a message.
-            Endpoint = Navigation.ToAbsoluteUri($"broken-agent/{mode}"),
-        });
+        _http = new HttpClient(new BrokenAgent(mode));
+        _client = new A2UIAgentClient(_http, _processor, new A2UIAgentClientOptions { Endpoint = BrokenAgent.Endpoint });
         _client.StateChanged += OnStateChanged;
         await _client.SendTextAsync("Hello");
     }
@@ -82,6 +82,8 @@
 
         _processor?.Dispose();
         _processor = null;
+        _http?.Dispose();
+        _http = null;
     }
 
     /// <summary>
