@@ -335,10 +335,14 @@ public sealed class A2UIAgentFunctions
     private async Task<JsonObject> RunAsync(A2UIAgentFunctionCall call, Registration registration, CancellationToken cancellationToken)
     {
         CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        // Read once, here: after a timeout the source is disposed, and a handler that only starts then must still get
+        // a cancelled token instead of an ObjectDisposedException.
+        CancellationToken token = linked.Token;
         Task<JsonNode?> run;
         if (_timeout == System.Threading.Timeout.InfiniteTimeSpan)
         {
-            run = InvokeAsync(registration.Handler, call, linked.Token);
+            run = InvokeAsync(registration.Handler, call, token);
         }
         else
         {
@@ -347,7 +351,7 @@ public sealed class A2UIAgentFunctions
 
             // The clock starts first and the handler runs on the thread pool, so a handler that blocks before its
             // first await still times out.
-            run = Task.Run(() => InvokeAsync(registration.Handler, call, linked.Token), CancellationToken.None);
+            run = Task.Run(() => InvokeAsync(registration.Handler, call, token), CancellationToken.None);
             Task finished = await Task.WhenAny(run, deadline).ConfigureAwait(false);
 
             // Stops the timer when the handler finished first. Only this method registers on the delay token.

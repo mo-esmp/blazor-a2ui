@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120" viewBox="0 0 240 120" role="img" aria-label="A table set for two">
+  <rect width="240" height="120" rx="12" fill="#f3efe6"/>
+  <rect x="40" y="58" width="160" height="10" rx="5" fill="#8a5a33"/>
+  <rect x="60" y="68" width="8" height="34" fill="#8a5a33"/>
+  <rect x="172" y="68" width="8" height="34" fill="#8a5a33"/>
+  <circle cx="90" cy="48" r="10" fill="#ffffff" stroke="#b8b0a0" stroke-width="2"/>
+  <circle cx="150" cy="48" r="10" fill="#ffffff" stroke="#b8b0a0" stroke-width="2"/>
+  <rect x="118" y="26" width="4" height="30" fill="#d9a441"/>
+</svg>

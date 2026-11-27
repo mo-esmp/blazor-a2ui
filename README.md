@@ -10,8 +10,8 @@ keeps a data model, and sends the user's actions back.
 > suites, and the Razor components (`BlazorA2UI`) render the whole basic catalog. The agent side
 > (`BlazorA2UI.Agent`) has its builders, validator, LLM prompts and response parsing, and the
 > messages that flow back from the renderer, `BlazorA2UI.Agent.AspNetCore` serves an agent
-> over HTTP, and `A2UIAgentClient` connects a Blazor app to it. A sample agent runs it all; the
-> sample renderer apps are in progress.
+> over HTTP, and `A2UIAgentClient` connects a Blazor app to it. A sample agent runs it all, and a
+> Blazor Server sample renders it; the WebAssembly sample is in progress.
 > Names may still change before the first release.
 >
 > | Part | Package | State |
@@ -24,7 +24,8 @@ keeps a data model, and sends the user's actions back.
 > | Streaming endpoint for ASP.NET Core | `BlazorA2UI.Agent.AspNetCore` | Done |
 > | Renderer-side client for the endpoint | `BlazorA2UI` | Done |
 > | Sample agent | `samples/SampleAgent` | Done |
-> | Sample renderer apps (Blazor Server, WebAssembly) | `samples/` | Planned |
+> | Blazor Server sample | `samples/BlazorServerSample` | Done |
+> | WebAssembly sample | `samples/` | Planned |
 
 ## Safety rules
 
@@ -213,7 +214,9 @@ origin (CORS, below).
 | `tests/BlazorA2UI.Agent.AspNetCore.Tests` | | Tests for the endpoint over real HTTP. |
 | `samples/SampleAgent` | | A table-booking agent on the streaming endpoint, with a real model or an offline script. See its [README](samples/SampleAgent/README.md). |
 | `tests/BlazorA2UI.SampleAgent.Tests` | | Tests for the sample agent over real HTTP with the library's client. |
-| `samples/` | | Blazor Server and WebAssembly sample apps. Planned. |
+| `samples/BlazorServerSample` | | A Blazor Server app that chats with the sample agent and shows the media allowlist and stream errors. See its [README](samples/BlazorServerSample/README.md). |
+| `tests/BlazorA2UI.BlazorServerSample.Tests` | | bUnit tests for its pages, and tests for its renderer wiring and broken pretend agent. |
+| `samples/` | | A WebAssembly sample app. Planned. |
 
 ## Building UI on the agent side
 
