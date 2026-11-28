@@ -37,12 +37,28 @@ internal sealed class SampleRendererOptions
     /// <summary>
     /// Checks the settings.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The agent's endpoint is not an absolute http or https URL.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The agent's endpoint is not an absolute http or https URL, or a media prefix is not one or has user info, a
+    /// query or a fragment.
+    /// </exception>
     internal void Validate()
     {
         if (!AgentEndpoint.IsAbsoluteUri || AgentEndpoint.Scheme is not ("http" or "https"))
         {
             throw new InvalidOperationException($"{Section}:AgentEndpoint must be an absolute http or https URL.");
+        }
+
+        // The same rules as A2UIMediaOptions.Allow, checked here so the error names the setting.
+        foreach (string prefix in MediaPrefixes)
+        {
+            if (!Uri.TryCreate(prefix, UriKind.Absolute, out Uri? uri)
+                || uri.Scheme is not ("http" or "https")
+                || uri.UserInfo.Length > 0
+                || uri.Query.Length > 0
+                || uri.Fragment.Length > 0)
+            {
+                throw new InvalidOperationException($"'{prefix}' in {Section}:MediaPrefixes is not an absolute http or https URL without user info, query or fragment.");
+            }
         }
     }
 }

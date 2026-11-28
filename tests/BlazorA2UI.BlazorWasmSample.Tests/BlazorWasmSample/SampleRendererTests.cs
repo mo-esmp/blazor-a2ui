@@ -151,6 +151,29 @@ public sealed class SampleRendererTests
     }
 
     /// <summary>
+    /// Proves that a media prefix the allowlist would refuse stops the app at startup with an error that names the
+    /// setting.
+    /// </summary>
+    /// <param name="prefix">The configured prefix.</param>
+    [Theory]
+    [InlineData("/media/")]
+    [InlineData("ftp://cdn.test/media/")]
+    [InlineData("https://user@cdn.test/media/")]
+    [InlineData("https://cdn.test/media/?v=1")]
+    [InlineData("https://cdn.test/media/#top")]
+    public void Load_InvalidMediaPrefix_Throws(string prefix)
+    {
+        // Arrange
+        IConfiguration configuration = Configuration(new Dictionary<string, string?> { ["BlazorWasmSample:MediaPrefixes:0"] = prefix });
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(() => SampleRendererOptions.Load(configuration));
+
+        // Assert
+        error.Message.ShouldContain("MediaPrefixes");
+    }
+
+    /// <summary>
     /// Builds a configuration from settings.
     /// </summary>
     /// <returns>The configuration.</returns>
