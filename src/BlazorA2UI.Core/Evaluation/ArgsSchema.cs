@@ -52,7 +52,7 @@ internal static class ArgsSchema
                 JsonArray coerced = new();
                 foreach (JsonNode? item in arr)
                 {
-                    coerced.Add(A2UIValues.ToBoolean(item));
+                    coerced.Add((JsonNode)JsonValue.Create(A2UIValues.ToBoolean(item)));
                 }
 
                 args[name] = coerced;

@@ -23,7 +23,8 @@ internal static class SampleRenderer
 
     /// <summary>
     /// Adds the renderer's services for each circuit: a processor with the basic and sample catalogs, the media
-    /// allowlist, and an agent client that streams server-sent events, so the agent's text arrives too.
+    /// allowlist, an agent client that streams server-sent events, so the agent's text arrives too, and the chat's
+    /// transcript, which lasts as long as the conversation.
     /// </summary>
     /// <returns>The services, for chaining.</returns>
     /// <param name="services">The services.</param>
@@ -43,6 +44,7 @@ internal static class SampleRenderer
             }));
         });
         services.AddHttpClient(HttpClientName);
+        services.AddScoped<ChatTranscript>();
         services.AddA2UIAgentClient(
             client =>
             {

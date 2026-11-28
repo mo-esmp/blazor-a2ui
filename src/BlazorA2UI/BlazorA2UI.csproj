@@ -5,6 +5,7 @@
     <Description>Blazor components for A2UI v1.0: renders agent-generated surfaces with native Razor components, a host-controlled media allowlist and class-only styling.</Description>
     <RootNamespace>BlazorA2UI</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
 
   <ItemGroup>

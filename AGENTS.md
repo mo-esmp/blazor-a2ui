@@ -19,10 +19,14 @@
 * `samples/SampleAgent` is a runnable agent on the endpoint. It is the only project that uses `Microsoft.Extensions.AI`,
   and samples are never packed. `samples/BlazorServerSample` is a Blazor Server app that talks to it through
   `A2UIAgentClient`; it links the agent's `SampleCatalog.cs` instead of referencing the agent project.
+  `samples/BlazorWasmSample` is a standalone WebAssembly app with the same pages that calls the agent across origins;
+  it links `SampleCatalog.cs` and the Server sample's `BrokenAgent.cs` and `ChatTranscript.cs`. Its trimmed publish is
+  the check that `BlazorA2UI` and `BlazorA2UI.Core`, both `IsTrimmable`, stay trim-safe.
 * `tests/BlazorA2UI.Core.Tests` holds the unit tests and the conformance tests. `tests/BlazorA2UI.Tests`,
-  `tests/BlazorA2UI.Agent.Tests`, `tests/BlazorA2UI.Agent.AspNetCore.Tests`, `tests/BlazorA2UI.SampleAgent.Tests` and
-  `tests/BlazorA2UI.BlazorServerSample.Tests` test the components, the agent side, the endpoint and the samples. The
-  endpoint and sample agent tests run Kestrel on a free local port, so they need no test-host package.
+  `tests/BlazorA2UI.Agent.Tests`, `tests/BlazorA2UI.Agent.AspNetCore.Tests`, `tests/BlazorA2UI.SampleAgent.Tests`,
+  `tests/BlazorA2UI.BlazorServerSample.Tests` and `tests/BlazorA2UI.BlazorWasmSample.Tests` test the components, the
+  agent side, the endpoint and the samples. The endpoint and sample agent tests run Kestrel on a free local port, so
+  they need no test-host package.
 
 ## Safety
 

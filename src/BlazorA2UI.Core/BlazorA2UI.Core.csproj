@@ -5,6 +5,7 @@
     <Description>UI-framework-agnostic A2UI v1.0 renderer core for .NET: message processing, data model, data binding, function evaluation and validation.</Description>
     <RootNamespace>BlazorA2UI</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
 
   <ItemGroup>

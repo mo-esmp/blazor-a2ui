@@ -11,14 +11,20 @@ namespace BlazorA2UI.Rendering;
 public sealed class A2UIComponentRegistry
 {
     /// <summary>
+    /// The members Blazor reaches by reflection on a component type: its parameters, which it sets, and its
+    /// constructor. A trimmed app keeps them for every registered renderer.
+    /// </summary>
+    private const DynamicallyAccessedMemberTypes Component = DynamicallyAccessedMemberTypes.All;
+
+    /// <summary>
     /// The renderers registered for one catalog, by catalog id and then component type.
     /// </summary>
-    private readonly Dictionary<string, Dictionary<string, Type>> _byCatalog = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Dictionary<string, Renderer>> _byCatalog = new(StringComparer.Ordinal);
 
     /// <summary>
     /// The renderers that apply to every catalog, by component type.
     /// </summary>
-    private readonly Dictionary<string, Type> _any = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Renderer> _any = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Creates a registry with the basic catalog's components.
@@ -52,24 +58,24 @@ public sealed class A2UIComponentRegistry
     /// <param name="componentType">The A2UI component type, as messages name it.</param>
     /// <param name="catalogId">The catalog it applies to, or null for every catalog. A catalog-specific renderer wins.</param>
     /// <returns>This registry, for chaining.</returns>
-    public A2UIComponentRegistry Register<TComponent>(string componentType, string? catalogId = null)
+    public A2UIComponentRegistry Register<[DynamicallyAccessedMembers(Component)] TComponent>(string componentType, string? catalogId = null)
         where TComponent : A2UIComponentBase
     {
         ArgumentException.ThrowIfNullOrEmpty(componentType);
-        Dictionary<string, Type> target = _any;
+        Dictionary<string, Renderer> target = _any;
         if (catalogId is not null)
         {
             ArgumentException.ThrowIfNullOrEmpty(catalogId);
-            if (!_byCatalog.TryGetValue(catalogId, out Dictionary<string, Type>? map))
+            if (!_byCatalog.TryGetValue(catalogId, out Dictionary<string, Renderer>? map))
             {
-                map = new Dictionary<string, Type>(StringComparer.Ordinal);
+                map = new Dictionary<string, Renderer>(StringComparer.Ordinal);
                 _byCatalog[catalogId] = map;
             }
 
             target = map;
         }
 
-        target[componentType] = typeof(TComponent);
+        target[componentType] = new Renderer(typeof(TComponent));
         return this;
     }
 
@@ -88,7 +94,7 @@ public sealed class A2UIComponentRegistry
             return _any.Remove(componentType);
         }
 
-        return _byCatalog.TryGetValue(catalogId, out Dictionary<string, Type>? map) && map.Remove(componentType);
+        return _byCatalog.TryGetValue(catalogId, out Dictionary<string, Renderer>? map) && map.Remove(componentType);
     }
 
     /// <summary>
@@ -97,15 +103,30 @@ public sealed class A2UIComponentRegistry
     /// <param name="component">The component to render.</param>
     /// <param name="renderer">The Razor component type, when one is registered.</param>
     /// <returns>False when no renderer is registered; the component then renders as a placeholder.</returns>
-    public bool TryGetRenderer(ComponentInstance component, [MaybeNullWhen(false)] out Type renderer)
+    public bool TryGetRenderer(ComponentInstance component, [MaybeNullWhen(false)][DynamicallyAccessedMembers(Component)] out Type renderer)
     {
         ArgumentNullException.ThrowIfNull(component);
-        if (_byCatalog.TryGetValue(component.Catalog.CatalogId, out Dictionary<string, Type>? map)
-            && map.TryGetValue(component.Type, out renderer))
+        if ((_byCatalog.TryGetValue(component.Catalog.CatalogId, out Dictionary<string, Renderer>? map) && map.TryGetValue(component.Type, out Renderer found))
+            || _any.TryGetValue(component.Type, out found))
         {
+            renderer = found.Type;
             return true;
         }
 
-        return _any.TryGetValue(component.Type, out renderer);
+        renderer = null;
+        return false;
+    }
+
+    /// <summary>
+    /// A registered renderer's type, which carries the trimming annotation that a dictionary value cannot.
+    /// </summary>
+    /// <param name="type">The Razor component type.</param>
+    private readonly struct Renderer([DynamicallyAccessedMembers(Component)] Type type)
+    {
+        /// <summary>
+        /// Gets the Razor component type.
+        /// </summary>
+        [DynamicallyAccessedMembers(Component)]
+        public Type Type { get; } = type;
     }
 }

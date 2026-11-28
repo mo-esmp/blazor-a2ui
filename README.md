@@ -10,8 +10,8 @@ keeps a data model, and sends the user's actions back.
 > suites, and the Razor components (`BlazorA2UI`) render the whole basic catalog. The agent side
 > (`BlazorA2UI.Agent`) has its builders, validator, LLM prompts and response parsing, and the
 > messages that flow back from the renderer, `BlazorA2UI.Agent.AspNetCore` serves an agent
-> over HTTP, and `A2UIAgentClient` connects a Blazor app to it. A sample agent runs it all, and a
-> Blazor Server sample renders it; the WebAssembly sample is in progress.
+> over HTTP, and `A2UIAgentClient` connects a Blazor app to it. A sample agent runs it all, and
+> Blazor Server and WebAssembly samples render it.
 > Names may still change before the first release.
 >
 > | Part | Package | State |
@@ -25,7 +25,7 @@ keeps a data model, and sends the user's actions back.
 > | Renderer-side client for the endpoint | `BlazorA2UI` | Done |
 > | Sample agent | `samples/SampleAgent` | Done |
 > | Blazor Server sample | `samples/BlazorServerSample` | Done |
-> | WebAssembly sample | `samples/` | Planned |
+> | WebAssembly sample | `samples/BlazorWasmSample` | Done |
 
 ## Safety rules
 
@@ -198,7 +198,8 @@ waiting actions; the next turn opens a new conversation.
   into a component and it processes messages on the renderer's thread.
 
 In WebAssembly the stream is read in the browser, so the agent endpoint must allow your app's
-origin (CORS, below).
+origin (CORS, below). `BlazorA2UI` and `BlazorA2UI.Core` are trimmable, and the WebAssembly
+sample's trimmed publish fails on any trim warning from them.
 
 ## Projects
 
@@ -216,7 +217,8 @@ origin (CORS, below).
 | `tests/BlazorA2UI.SampleAgent.Tests` | | Tests for the sample agent over real HTTP with the library's client. |
 | `samples/BlazorServerSample` | | A Blazor Server app that chats with the sample agent and shows the media allowlist and stream errors. See its [README](samples/BlazorServerSample/README.md). |
 | `tests/BlazorA2UI.BlazorServerSample.Tests` | | bUnit tests for its pages, and tests for its renderer wiring and broken pretend agent. |
-| `samples/` | | A WebAssembly sample app. Planned. |
+| `samples/BlazorWasmSample` | | A standalone Blazor WebAssembly app with the same pages, calling the agent across origins and published with trimming. See its [README](samples/BlazorWasmSample/README.md). |
+| `tests/BlazorA2UI.BlazorWasmSample.Tests` | | bUnit tests for its pages, and tests for its renderer wiring and settings. |
 
 ## Building UI on the agent side
 
