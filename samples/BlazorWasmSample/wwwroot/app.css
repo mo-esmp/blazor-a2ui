@@ -1,0 +1,100 @@
+body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    color: #1f2328;
+}
+
+.page {
+    display: flex;
+    min-height: 100vh;
+}
+
+.page nav {
+    width: 12rem;
+    padding: 1.5rem 1rem;
+    background: #f6f8fa;
+    border-right: 1px solid #d0d7de;
+}
+
+.page nav a {
+    display: block;
+    padding: 0.4rem 0.5rem;
+    color: inherit;
+    text-decoration: none;
+    border-radius: 6px;
+}
+
+.page nav a.active {
+    background: #dde4ee;
+    font-weight: 600;
+}
+
+.page main {
+    flex: 1;
+    max-width: 48rem;
+    padding: 1.5rem 2rem;
+}
+
+.hint {
+    color: #59636e;
+}
+
+.transcript {
+    list-style: none;
+    padding: 0;
+}
+
+.transcript li {
+    margin: 0.4rem 0;
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    white-space: pre-wrap;
+}
+
+.transcript .user {
+    background: #ddf4ff;
+    margin-left: 4rem;
+}
+
+.transcript .agent {
+    background: #f6f8fa;
+    margin-right: 4rem;
+}
+
+.surfaces > * {
+    margin: 1rem 0;
+}
+
+.composer {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.composer input {
+    flex: 1;
+    padding: 0.5rem;
+}
+
+.status {
+    color: #59636e;
+}
+
+.error {
+    color: #b42318;
+}
+
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    padding: 0.6rem 1.25rem;
+    background: #fff4ce;
+}
+
+.loading {
+    padding: 1.5rem 2rem;
+    color: #59636e;
+}

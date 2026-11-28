@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>BlazorA2UI.BlazorWasmSample</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!--
+      Published with trimming, so the build checks that the packages are trim-safe. The WebAssembly SDK hides trim
+      warnings by default; showing each one, with warnings as errors, makes any trim-unsafe code fail the publish.
+    -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <SuppressTrimAnalysisWarnings>false</SuppressTrimAnalysisWarnings>
+    <!--
+      Each framework assembly collapses its warnings into one IL2104, which is hidden: Microsoft supports trimming
+      Blazor itself. The ShowTrimWarnings target below lists every warning of this repository's assemblies instead.
+    -->
+    <TrimmerSingleWarn>true</TrimmerSingleWarn>
+    <NoWarn>$(NoWarn);IL2104</NoWarn>
+    <!-- Binds the settings with generated code instead of reflection, which trimming would break. -->
+    <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+  </PropertyGroup>
+
+  <!-- Lists every trim warning of the packages and the app, so with warnings as errors a trim-unsafe call fails the publish. -->
+  <Target Name="ShowTrimWarnings" AfterTargets="PrepareForILLink">
+    <ItemGroup>
+      <ManagedAssemblyToLink Condition="'%(Filename)' == 'BlazorA2UI' Or '%(Filename)' == 'BlazorA2UI.Core' Or '%(Filename)' == '$(AssemblyName)'">
+        <TrimmerSingleWarn>false</TrimmerSingleWarn>
+      </ManagedAssemblyToLink>
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BlazorA2UI.BlazorWasmSample.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The sample agent's catalog, shared as source so both sides declare the same functions. -->
+    <Compile Include="..\SampleAgent\SampleCatalog.cs" Link="SampleCatalog.cs" />
+    <!-- The Blazor Server sample's pretend broken agent, shared as source for the Errors page. -->
+    <Compile Include="..\BlazorServerSample\BrokenAgent.cs" Link="BrokenAgent.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BlazorA2UI\BlazorA2UI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

@@ -137,7 +137,7 @@
 
         if (on && !present)
         {
-            next.Add(value);
+            next.Add((JsonNode)JsonValue.Create(value));
         }
 
         Write("value", next);

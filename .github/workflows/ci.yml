@@ -45,6 +45,10 @@ jobs:
             - name: Test
               run: dotnet test --configuration Release --no-build --logger "trx;LogFilePrefix=results" --results-directory TestResults
 
+            # Trims the WebAssembly sample; any trim warning from the packages or the app fails the publish.
+            - name: Publish the WebAssembly sample with trimming
+              run: dotnet publish samples/BlazorWasmSample --configuration Release
+
             - name: Upload test results
               if: ${{ !cancelled() }}
               uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -14,7 +14,7 @@ packages working together:
   `checkAvailability` as the user types. The Book button's `book` action is handled in code from
   start to finish: the agent checks the request, calls the renderer function `getTimeZone`, and
   replaces the form with a confirmation.
-- **CORS** allows only the renderer apps' origins.
+- **CORS** allows only the renderer apps' origins, such as the [WebAssembly sample](../BlazorWasmSample/README.md)'s.
 
 ## Run it
 

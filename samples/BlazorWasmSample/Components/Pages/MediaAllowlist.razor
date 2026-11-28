@@ -1,0 +1,63 @@
+@page "/media"
+@implements IDisposable
+@inject NavigationManager Navigation
+
+<PageTitle>Media allowlist</PageTitle>
+
+<h1>Media allowlist</h1>
+<p class="hint">
+    A model writes the UI, so an image URL in a message is untrusted. Images load only from the prefixes in
+    <code>BlazorWasmSample:MediaPrefixes</code>; any other image renders as a blocked placeholder, and the browser
+    never fetches it. This surface holds one of each.
+</p>
+
+<A2UISurface SurfaceId="@SurfaceId" Processor="_processor" />
+
+@code {
+    /// <summary>
+    /// The id of the demo surface.
+    /// </summary>
+    internal const string SurfaceId = "media";
+
+    /// <summary>
+    /// An image on a host the allowlist does not name.
+    /// </summary>
+    internal const string BlockedUrl = "https://tracker.example/pixel.png";
+
+    /// <summary>
+    /// A processor for this page only, so the demo does not mix with the chat's surfaces.
+    /// </summary>
+    private readonly MessageProcessor _processor = new([BasicCatalog.Create()]);
+
+    /// <summary>
+    /// Creates the demo surface, as if an agent had sent it: an image from the app's own media folder and one from
+    /// another host.
+    /// </summary>
+    protected override void OnInitialized()
+    {
+        string allowedUrl = Navigation.ToAbsoluteUri("media/allowed.svg").AbsoluteUri;
+        // The constructor takes the nodes as they are; a collection expression would call JsonArray.Add<T>, which
+        // trimming does not support.
+        JsonArray components = new(
+            new JsonObject { ["id"] = "root", ["component"] = "Column", ["children"] = new JsonArray("allowedText", "allowed", "blockedText", "blocked") },
+            new JsonObject { ["id"] = "allowedText", ["component"] = "Text", ["text"] = "From the app's media folder, which the allowlist names:" },
+            new JsonObject { ["id"] = "allowed", ["component"] = "Image", ["url"] = allowedUrl, ["description"] = "A table set for two" },
+            new JsonObject { ["id"] = "blockedText", ["component"] = "Text", ["text"] = "From a host the allowlist does not name:" },
+            new JsonObject { ["id"] = "blocked", ["component"] = "Image", ["url"] = BlockedUrl, ["description"] = "A tracking pixel" });
+        _processor.Process(new JsonObject
+        {
+            ["version"] = "1.0",
+            ["createSurface"] = new JsonObject
+            {
+                ["surfaceId"] = SurfaceId,
+                ["catalogId"] = "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
+                ["components"] = components,
+            },
+        });
+    }
+
+    /// <summary>
+    /// Releases the page's processor.
+    /// </summary>
+    public void Dispose() => _processor.Dispose();
+}

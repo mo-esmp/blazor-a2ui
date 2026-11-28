@@ -19,6 +19,24 @@ public sealed class AgentCallManagerTests
     private static readonly string s_basicId = BasicCatalog.CatalogId;
 
     /// <summary>
+    /// Proves that object keys in the cache key are escaped as JSON escapes them, so keys with quotes or markup
+    /// characters neither collide nor break the canonical form.
+    /// </summary>
+    [Fact]
+    public void CacheKey_KeysNeedEscaping_EscapesAsJson()
+    {
+        // Arrange
+        JsonObject args = new() { ["a\"b"] = 1, ["<\n>"] = 2 };
+        string expected = $"c\nf\n{{{System.Text.Json.JsonSerializer.Serialize("<\n>")}:2,{System.Text.Json.JsonSerializer.Serialize("a\"b")}:1}}";
+
+        // Act
+        string key = AgentCallManager.CacheKey("c", "f", args);
+
+        // Assert
+        key.ShouldBe(expected);
+    }
+
+    /// <summary>
     /// Proves that cancelling an unanswered action call frees its pending-call slot, so the next call can be sent.
     /// </summary>
     [Fact]

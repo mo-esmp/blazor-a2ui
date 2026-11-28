@@ -1,0 +1,19 @@
+@using System.Diagnostics.CodeAnalysis
+@attribute [UnconditionalSuppressMessage("Trimming", "IL2110", Justification = NotFoundPageJustification)]
+@attribute [UnconditionalSuppressMessage("Trimming", "IL2111", Justification = NotFoundPageJustification)]
+
+<Router AppAssembly="typeof(App).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>
+
+@code {
+    /// <summary>
+    /// Why the trimmer's warnings about the router's <c>NotFoundPage</c> are safe to hide: Blazor sets the annotated
+    /// parameter by reflection, and its value is a <c>typeof</c> of a page the trimmer keeps whole, as it keeps every
+    /// routable page.
+    /// </summary>
+    private const string NotFoundPageJustification = "NotFoundPage is typeof(Pages.NotFound), a routable page the trimmer keeps.";
+}

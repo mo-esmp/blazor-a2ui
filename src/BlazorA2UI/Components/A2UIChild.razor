@@ -1,4 +1,7 @@
+@using System.Diagnostics.CodeAnalysis
 @inject A2UIComponentRegistry Registry
+@attribute [UnconditionalSuppressMessage("Trimming", "IL2110", Justification = DynamicComponentJustification)]
+@attribute [UnconditionalSuppressMessage("Trimming", "IL2111", Justification = DynamicComponentJustification)]
 
 @if (Depth > MaxDepth)
 {
@@ -18,6 +21,13 @@ else
     /// The deepest component rendered; deeper ones render a note. Matches the default tree depth limit.
     /// </summary>
     internal const int MaxDepth = 50;
+
+    /// <summary>
+    /// Why the trimmer's warnings about <see cref="DynamicComponent"/> are safe to hide: Blazor sets its annotated
+    /// <c>Type</c> parameter by reflection, and every type passed to it comes from the registry, which keeps all
+    /// members of each registered renderer.
+    /// </summary>
+    private const string DynamicComponentJustification = "The renderer type comes from A2UIComponentRegistry, whose Register<TComponent> keeps every member Blazor needs.";
 
     /// <summary>
     /// Gets or sets the surface the component belongs to.

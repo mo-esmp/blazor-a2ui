@@ -419,7 +419,7 @@ internal sealed class AgentCallManager : IAgentFunctionRouter
                     }
 
                     first = false;
-                    sb.Append(JsonSerializer.Serialize(key)).Append(':');
+                    sb.Append('"').Append(JsonEncodedText.Encode(key).Value).Append("\":");
                     WriteCanonical(value, sb);
                 }
 
