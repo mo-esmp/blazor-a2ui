@@ -1,4 +1,5 @@
-﻿using BlazorA2UI.Evaluation;
+﻿using BlazorA2UI.BlazorServerSample;
+using BlazorA2UI.Evaluation;
 using BlazorA2UI.Media;
 using BlazorA2UI.SampleAgent;
 
@@ -12,8 +13,8 @@ internal static class SampleRenderer
 {
     /// <summary>
     /// Adds the renderer's services: a processor with the basic and sample catalogs, the media allowlist, and an agent
-    /// client that streams server-sent events, so the agent's text arrives too. The client sends with the
-    /// <see cref="HttpClient"/> registered in the services.
+    /// client that streams server-sent events, so the agent's text arrives too, and the chat's transcript, which lasts as
+    /// long as the conversation. The client sends with the <see cref="HttpClient"/> registered in the services.
     /// </summary>
     /// <returns>The services, for chaining.</returns>
     /// <param name="services">The services.</param>
@@ -32,6 +33,7 @@ internal static class SampleRenderer
                 [SampleCatalog.GetTimeZone] = GetTimeZoneAsync,
             }));
         });
+        services.AddScoped<ChatTranscript>();
         services.AddA2UIAgentClient(client =>
         {
             client.Endpoint = options.AgentEndpoint;

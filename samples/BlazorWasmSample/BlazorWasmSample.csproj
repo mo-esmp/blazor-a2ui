@@ -42,6 +42,8 @@
     <Compile Include="..\SampleAgent\SampleCatalog.cs" Link="SampleCatalog.cs" />
     <!-- The Blazor Server sample's pretend broken agent, shared as source for the Errors page. -->
     <Compile Include="..\BlazorServerSample\BrokenAgent.cs" Link="BrokenAgent.cs" />
+    <!-- The chat's transcript, which outlives the Chat page, shared with the Blazor Server sample. -->
+    <Compile Include="..\BlazorServerSample\ChatTranscript.cs" Link="ChatTranscript.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -123,6 +123,51 @@ public sealed class ChatTests
     }
 
     /// <summary>
+    /// Proves that leaving the page and coming back shows the conversation as it was, because the transcript lives as
+    /// long as the conversation, not the page.
+    /// </summary>
+    [Fact]
+    public async Task Render_ReturnToPage_RestoresTranscript()
+    {
+        // Arrange
+        FakeAgentHandler agent = new(() => FakeAgentHandler.EventStream("Let's find you a table.", CreateSurface));
+        await using BunitContext context = Context(agent);
+        IRenderedComponent<Chat> page = context.Render<Chat>();
+        page.Find("input[aria-label=Message]").Change("Book a table");
+        page.Find("form").Submit();
+        page.WaitForAssertion(() => page.Find(".status").TextContent.ShouldBe("Done."));
+        await context.DisposeComponentsAsync();
+
+        // Act
+        IRenderedComponent<Chat> returned = context.Render<Chat>();
+
+        // Assert
+        returned.FindAll(".transcript li").Select(li => li.TextContent).ShouldBe(["Book a table", "Let's find you a table."]);
+        returned.Find(".surfaces .a2ui-text").TextContent.ShouldBe("Book a table");
+    }
+
+    /// <summary>
+    /// Proves that the agent's text that arrives while another page is open is kept for when the user comes back.
+    /// </summary>
+    [Fact]
+    public async Task Render_TextArrivedWhileAway_ShowsIt()
+    {
+        // Arrange
+        FakeAgentHandler agent = new(() => FakeAgentHandler.EventStream("Your table is booked."));
+        await using BunitContext context = Context(agent);
+        context.Render<Chat>();
+        await context.DisposeComponentsAsync();
+        A2UIAgentClient client = context.Services.GetRequiredService<A2UIAgentClient>();
+        await client.SendTextAsync("Book it");
+
+        // Act
+        IRenderedComponent<Chat> returned = context.Render<Chat>();
+
+        // Assert
+        returned.FindAll(".transcript li").Select(li => li.TextContent).ShouldBe(["Your table is booked."]);
+    }
+
+    /// <summary>
     /// Proves that blank text is not sent.
     /// </summary>
     [Fact]

@@ -40,7 +40,8 @@ CI runs the same publish on every pull request.
   line calls the agent function `checkAvailability` as you type, and Book makes the agent call the
   renderer function `getTimeZone`. The app answers it from `TimeZoneInfo.Local`, which in
   WebAssembly is the browser's time zone, so no JavaScript is needed. Stop cancels the turn. A
-  refused or failed turn shows the client's error.
+  refused or failed turn shows the client's error. The transcript lasts as long as the conversation,
+  so leaving the page and coming back shows it again; its code is shared with the Blazor Server sample.
 - **Media** (`/media`) renders a local surface with two images. The one under the app's own
   `/media/` folder is on the allowlist and loads; the other is blocked, and the browser never
   requests it.
